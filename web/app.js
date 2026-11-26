@@ -1354,6 +1354,18 @@
     /* iOS Safari 只有页面有 touchstart 监听时才会触发 :active，这里垫一个空的 */
     document.addEventListener('touchstart', function () {}, { passive: true });
 
+    /* 检查更新：装在 App 里就走原生（GitHub Releases），浏览器里只提示 */
+    const checkUpdateRow = document.getElementById('checkUpdateRow');
+    if (checkUpdateRow) {
+      checkUpdateRow.addEventListener('click', function () {
+        if (window.DshNative && window.DshNative.postMessage) {
+          window.DshNative.postMessage('checkUpdate');
+        } else {
+          showToast('已是最新版本 · 网页预览不检查更新');
+        }
+      });
+    }
+
     /* 所有带 data-toast 的元素：点一下弹提示 */
     document.querySelectorAll('[data-toast]').forEach(function (btn) {
       btn.addEventListener('click', function () {
