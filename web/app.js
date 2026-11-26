@@ -738,7 +738,7 @@
         btn.appendChild(ico);
         btn.appendChild(el('span', 'plus-label', item.label));
         btn.addEventListener('click', function () {
-          showToast(item.label + ' · 待接入');
+          showToast(item.label + ' · 暂未开发');
         });
         page.appendChild(btn);
       });

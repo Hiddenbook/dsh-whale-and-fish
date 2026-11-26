@@ -75,9 +75,12 @@ button {
   height: 100dvh;
   margin: 0 auto;
   overflow: hidden;
-  /* App 里状态栏被收起时 env() 为 0，留 10px 免得顶到摄像头开孔 */
-  padding-top: max(env(safe-area-inset-top, 0px), 10px);
+  /* 顶部内边距 = 状态栏高度：App 里由原生把真实高度写进 --safe-top */
+  padding-top: max(env(safe-area-inset-top, 0px), var(--safe-top, 10px));
   background: linear-gradient(180deg, #27406C 0%, #7C9EC4 22%, #DCE9F8 40%, #C8DBF0 100%);
+  /* 渐变从最外沿开始画，别让 padding 那一段露出浅色空条 */
+  background-origin: border-box;
+  background-clip: border-box;
 }
 
 @media (min-width: 480px) {
@@ -90,7 +93,9 @@ button {
 
 .scene {
   position: absolute;
-  inset: 0;
+  /* 顶部让出状态栏那一段：否则 .scene 里的天空会画进 padding 区，
+     在状态栏下面露出一条浅色空条 */
+  inset: max(env(safe-area-inset-top, 0px), var(--safe-top, 10px)) 0 0 0;
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
@@ -905,7 +910,7 @@ button {
   left: 12px;
   right: 12px;
   /* 让开底部 tab 栏（64px）再留 16px */
-  bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(80px + max(env(safe-area-inset-bottom, 0px), var(--safe-bottom, 0px)));
   z-index: 46;
   padding: 6px;
   border-radius: 18px;
@@ -1509,7 +1514,7 @@ button {
 
 /* 聊天详情隐藏 tab 栏后，输入栏直接贴屏幕底边，给刘海屏留一点安全区 */
 .phone.is-sub .composer {
-  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(10px + max(env(safe-area-inset-bottom, 0px), var(--safe-bottom, 0px)));
 }
 
 .voice-top {
@@ -2300,7 +2305,7 @@ button {
   display: flex;
   gap: 2px;
   padding: 6px 8px;
-  padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(6px + max(env(safe-area-inset-bottom, 0px), var(--safe-bottom, 0px)));
   border-top: 1px solid rgba(255, 255, 255, 0.9);
   background: rgba(246, 250, 255, 0.92);
   box-shadow: 0 -6px 20px rgba(16, 42, 84, 0.1);

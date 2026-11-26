@@ -8,13 +8,15 @@ import 'update.dart';
 /// 更新源仓库（换仓库只改这一行）
 const String kRepo = 'Hiddenbook/dsh-whale-and-fish';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 内容铺满整屏（含状态栏区域），状态栏透明 —— 这样顶部不会留一条浅色空条
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
-      statusBarBrightness: Brightness.light,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
       systemNavigationBarColor: Color(0xFFF6FAFF),
       systemNavigationBarIconBrightness: Brightness.dark,
     ),
@@ -70,10 +72,9 @@ class _WebShellState extends State<WebShell> {
             case 'checkUpdate':
               _checkUpdate(manual: true);
               break;
-            // 网页在 App 里默认要求"全屏"：把状态栏、导航栏收起来
+            // 网页说"进全屏"：这里就是铺满整屏（状态栏透明覆盖），不隐藏系统栏，
+            // 这样顶部既有背景色、时间电量也还在
             case 'fullscreen':
-              SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-              break;
             case 'exitFullscreen':
               SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
               break;
@@ -82,6 +83,11 @@ class _WebShellState extends State<WebShell> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
+          onPageFinished: (_) {
+            // 页面（重）加载后重新告诉它状态栏有多高
+            _lastTopInset = null;
+            _pushSafeTop(MediaQuery.of(context).viewPadding.top);
+          },
           onWebResourceError: (WebResourceError error) {
             debugPrint('[webview] ${error.errorCode} ${error.description}');
           },
@@ -95,6 +101,22 @@ class _WebShellState extends State<WebShell> {
         if (mounted) _checkUpdate(manual: false);
       });
     });
+  }
+
+  /// 状态栏高度：WebView 里 env(safe-area-inset-top) 一般是 0，
+  /// 所以由原生把真实高度写成 CSS 变量，网页用它做顶部内边距
+  double? _lastTopInset;
+  double? _lastBottomInset;
+
+  void _pushSafeTop(double top) {
+    final double bottom = MediaQuery.of(context).viewPadding.bottom;
+    if (_lastTopInset == top && _lastBottomInset == bottom) return;
+    _lastTopInset = top;
+    _lastBottomInset = bottom;
+    _web.runJavaScript(
+      "document.documentElement.style.setProperty('--safe-top', '${top.round()}px');"
+      "document.documentElement.style.setProperty('--safe-bottom', '${bottom.round()}px');",
+    );
   }
 
   /// 返回键：先在网页里退一层（二级页 → 一级页 → 首页），退无可退才退出 App
@@ -285,9 +307,17 @@ class _WebShellState extends State<WebShell> {
         if (didPop) return;
         _handleBack();
       },
-      child: Scaffold(
-        backgroundColor: const Color(0xFFE8F1FD),
-        body: SafeArea(child: WebViewWidget(controller: _web)),
+      child: Builder(
+        builder: (BuildContext ctx) {
+          // 不用 SafeArea：让 WebView 顶到屏幕最上面，顶部空白由网页自己的 padding 处理
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _pushSafeTop(MediaQuery.of(ctx).viewPadding.top);
+          });
+          return Scaffold(
+            backgroundColor: const Color(0xFFE8F1FD),
+            body: WebViewWidget(controller: _web),
+          );
+        },
       ),
     );
   }
