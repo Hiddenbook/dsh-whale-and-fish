@@ -3,6 +3,15 @@
 App 内置了更新检查：点「设置 → 检查更新」，或启动 2 秒后自动静默查一次。
 数据源是**本仓库的 GitHub Releases**，不需要服务器。
 
+## 已发布的版本
+
+| 版本 | 时间 | 内容 | 资产 |
+|---|---|---|---|
+| `v0.1.0` | 2026-11-26 | 初始版本：界面原型 + WebView 壳 + 应用内更新 | `app-arm64-v8a-release.apk`（16.6MB）、`app-armeabi-v7a-release.apk`（14.1MB） |
+
+> 这台机器上 `github.com` 网页有时连不通（`000`），但 `api.github.com` 和
+> `uploads.github.com` 是通的，所以发版可以全用 API 完成（见下）。
+
 ## 发一个新版本的完整流程
 
 ### 1. 改版本号
@@ -52,6 +61,24 @@ GitHub 仓库 → **Releases** → **Draft a new release**：
 2. 装上这个包 → 点检查更新 → 应提示「已是最新版本 0.1.0」
 3. 把 `pubspec.yaml` 改成 `0.1.1+2` → 重新打包 → 发 Release `v0.1.1`
 4. 手机上再点检查更新 → 这次应该真的走完下载 + 安装
+
+## 用 API 发版（不用打开网页）
+
+```bash
+TOKEN=你的个人访问令牌          # 勾 public_repo 即可
+R=Hiddenbook/dsh-whale-and-fish
+
+# 1. 建 release
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.github.com/repos/$R/releases \
+  -d '{"tag_name":"v0.1.1","name":"0.1.1","body":"更新说明","draft":false,"prerelease":false}'
+
+# 2. 传包（name 参数决定 asset 文件名，必须带 arm64）
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/vnd.android.package-archive" \
+  --data-binary @app-arm64-v8a-release.apk \
+  "https://uploads.github.com/repos/$R/releases/<release_id>/assets?name=app-arm64-v8a-release.apk"
+```
 
 ## 实现位置
 
