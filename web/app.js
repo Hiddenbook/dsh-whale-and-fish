@@ -33,8 +33,28 @@
   ];
 
   /** 会话列表：type = friend / group；messages 目前都是空的 */
+  /* 当前是手机还是电脑（看设备，不看浏览器）：App 里一定是 phone；
+     电脑浏览器用"没有触摸 + 精细指针 + 宽屏"判断 */
+  function detectDevice() {
+    if (typeof window.DshDevice === 'string') return window.DshDevice; /* 原生可直接指定 */
+    if (typeof window.DshNative !== 'undefined') return 'phone';      /* App 里 */
+    const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    const narrow = window.innerWidth < 620;
+    return coarse || narrow ? 'phone' : 'desktop';
+  }
+
+  const DEVICE = detectDevice();
+
   const SESSIONS = [
     { id: 'xiaoyu', name: '小鱼', type: 'friend', avatar: 'photo', messages: [] },
+    {
+      id: 'peer',
+      name: DEVICE === 'phone' ? '我的电脑' : '我的手机',
+      type: 'peer',
+      /* 用「我」的资料图，和我的页同一个素材（DEVICE 只影响名字） */
+      avatar: 'user',
+      messages: [],
+    },
   ];
 
   /** 朋友圈动态（清空状态，接手后端后往这里填） */
@@ -207,6 +227,15 @@
     }
   }
 
+  /* 提前解码主图，别等第一次进页面才解码（那就是"显影"的来源） */
+  function warmImages() {
+    ['assets/xiaoyu.jpg', 'assets/avatar-user.jpg'].forEach(function (src) {
+      const img = new Image();
+      img.src = src;
+      if (img.decode) img.decode().catch(function () {});
+    });
+  }
+
   function startSlotTimer() {
     renderSlot();
     window.setInterval(renderSlot, 1000);
@@ -337,7 +366,15 @@
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }
 
+  let saveTimer = null;
+
   function saveState() {
+    if (saveTimer) window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(flushSave, 260);
+  }
+
+  function flushSave() {
+    saveTimer = null;
     const base = {
       tab: state.tab,
       bgDelivery: state.bgDelivery,
@@ -427,7 +464,7 @@
 
   function tokensLabel(msg) {
     const n = typeof msg.tokens === 'number' ? msg.tokens : estimateTokens(msg.text);
-    return state.costMode ? formatCost(n) : n + ' token';
+    return state.costMode ? formatCost(n) : n + ' Token';
   }
 
   function actionItem(icon, count) {
@@ -505,8 +542,8 @@
 
   function paintSessionAvatar(node, session) {
     if (!node) return;
-    if (session.avatar === 'photo') {
-      node.classList.add('avatar-photo');
+    if (session.avatar === 'photo' || session.avatar === 'user') {
+      node.classList.add(session.avatar === 'user' ? 'avatar-user' : 'avatar-photo');
       node.textContent = '';
     } else {
       node.classList.add('avatar-emoji');
@@ -532,6 +569,47 @@
     }
   }
 
+  /* ---------------- 渲染签名：数据没变就不重建 DOM ----------------
+     每次进聊天页都重建会话列表，会把头像、缩略图全部重新解码，
+     观感就是"从模糊到清晰"地显影一下；比较签名后跳过重建，切页就是瞬移 */
+  let sessionsSig = '';
+  let chatSig = '';
+
+  function sessionsSignature() {
+    const tail = function (session) {
+      const msg = session.messages[session.messages.length - 1];
+      return msg ? msg.time + '|' + (msg.text || msg.kind || '') : '';
+    };
+    return [
+      state.sessionFilter,
+      (state.search || '').trim(),
+      SESSIONS.map(function (session) {
+        return [
+          session.id,
+          session.pinned ? 1 : 0,
+          session.starred ? 1 : 0,
+          session.unread ? 1 : 0,
+          session.messages.length,
+          tail(session),
+        ].join(',');
+      }).join(';'),
+    ].join('~');
+  }
+
+  function chatSignature(session) {
+    const msg = session.messages[session.messages.length - 1];
+    return [
+      session.id,
+      session.name,
+      session.starred ? 1 : 0,
+      state.selectMode ? 1 : 0,
+      state.selected.join('.'),
+      state.quote ? 1 : 0,
+      session.messages.length,
+      msg ? msg.time + '|' + (msg.state || '') + '|' + (msg.text || msg.kind || '') : '',
+    ].join('~');
+  }
+
   function renderSessions() {
     const box = document.getElementById('sessionList');
     if (!box) return;
@@ -549,8 +627,14 @@
       return hay.indexOf(q) !== -1;
     });
 
+    /* 置顶的排在最前面；rest 之间保持原顺序（ES2019 起 sort 是稳定的） */
+    list.sort(function (a, b) {
+      return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+    });
+
     if (!list.length) {
       box.appendChild(el('p', 'session-empty', q ? '没有找到「' + state.search.trim() + '」' : EMPTY.sessions));
+      sessionsSig = sessionsSignature();
       return;
     }
 
@@ -560,6 +644,7 @@
       const row = el('button', 'session');
       row.type = 'button';
       row.dataset.id = session.id;
+      if (session.pinned) row.classList.add('is-pinned');
 
       const avatar = el('div', 'session-avatar');
       paintSessionAvatar(avatar, session);
@@ -630,10 +715,310 @@
 
       box.appendChild(row);
     });
+
+    sessionsSig = sessionsSignature();
   }
 
   /* ---- 会话长按菜单 ---- */
   let menuTarget = null;
+
+  /* ==========================================================
+     局域网互发：「我的电脑 / 我的手机」
+     电脑上跑 tools/serve.py（同一个服务），两边打开页面就能互发消息。
+     手机 App 里页面是本地文件，需要手动填一次电脑地址（192.168.x.x:8080）。
+     ========================================================== */
+  const PEER_KEY = 'dsh.peer.base';
+  const PEER_SINCE_KEY = 'dsh.peer.since';
+  const PEER_CID_KEY = 'dsh.peer.cid';
+
+  function peerClientId() {
+    if (peer.cid) return peer.cid;
+    /* 每个标签页 / 每个 App 一份（放 sessionStorage），
+       否则同一个浏览器开两个页面会拿到同一个 id，互相收不到消息 */
+    try {
+      peer.cid = window.sessionStorage.getItem(PEER_CID_KEY) || '';
+    } catch (err) {
+      peer.cid = '';
+    }
+    if (!peer.cid) {
+      peer.cid = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      try {
+        window.sessionStorage.setItem(PEER_CID_KEY, peer.cid);
+      } catch (err) {
+        /* ignore */
+      }
+    }
+    return peer.cid;
+  }
+
+  const peer = {
+    role: DEVICE,
+    cid: '',
+    base: '',
+    since: 0,
+    online: false,
+    generation: 0,
+    timer: 0,
+  };
+
+  /* 调试用：控制台里能看 peer.since / online */
+  window.__dshPeer = peer;
+  window.__dshSessions = SESSIONS;
+
+  function peerSession() {
+    return SESSIONS.find(function (item) { return item.type === 'peer'; });
+  }
+
+  function peerAddress() {
+    if (peer.base) return peer.base;
+    try {
+      peer.base = window.localStorage.getItem(PEER_KEY) || '';
+    } catch (err) {
+      peer.base = '';
+    }
+    if (!peer.base && /^https?:$/.test(location.protocol)) {
+      peer.base = location.origin; /* 浏览器里就是当前地址 */
+    }
+    return peer.base;
+  }
+
+  function setPeerAddress(value) {
+    peer.base = value.replace(/\/.*$/, '').trim();
+    try {
+      window.localStorage.setItem(PEER_KEY, peer.base);
+    } catch (err) {
+      /* ignore */
+    }
+    /* 换了地址要提醒原生服务指向新地址 */
+    syncBackgroundPoll();
+  }
+
+  /** 后台接收：App 里交给原生前台服务（15 秒拉一次局域网中继，网页被冻结也不影响）；
+   *  浏览器里做不到，只能记住开关状态。返回是否真的交给了原生。 */
+  function syncBackgroundPoll() {
+    if (!window.DshNative || !window.DshNative.postMessage) return false;
+    const base = peerAddress();
+    const on = !!state.bgDelivery && !!base;
+    window.DshNative.postMessage('peerPoll:' + (on ? 1 : 0) + '|' + (base || ''));
+    return true;
+  }
+
+  /* 原生发现没有通知权限时会回调这里，把开关退回关闭 */
+  window.DshNotifyDenied = function () {
+    state.bgDelivery = false;
+    saveState();
+    const toggle = document.getElementById('bgDelivery');
+    if (toggle) toggle.checked = false;
+    showToast('没有通知权限，后台接收已关闭');
+  };
+
+  function peerUrl(path) {
+    const base = peerAddress();
+    if (!base) return '';
+    return (/^https?:\/\//.test(base) ? base : 'http://' + base) + path;
+  }
+
+  /** 聊天头部那行状态：peer 会话显示连接状态，其它还是"在线/正在输入" */
+  function renderChatStatusLine() {
+    const session = activeSession();
+    if (session && session.type === 'peer') {
+      paintPeerStatus();
+      return;
+    }
+    refreshChatStatus();
+  }
+
+  function paintPeerStatus() {
+    const session = peerSession();
+    if (!session) return;
+
+    const state = !peerAddress() ? '未设置地址' : peer.online ? '已连接' : '未连接';
+    const node = document.getElementById('chatStatusText');
+    if (node && activeSession().type === 'peer') {
+      node.textContent = state + (peer.online ? ' · 点这里查看' : ' · 点这里设置');
+      node.classList.toggle('is-offline', !peer.online);
+    }
+  }
+
+  async function peerSend(text) {
+    const url = peerUrl('/send');
+    if (!url) {
+      showToast('先设置电脑地址');
+      return false;
+    }
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: peer.role,
+          cid: peerClientId(),
+          text: text,
+          time: nowTime(),
+        }),
+      });
+      if (!res.ok) throw new Error('bad status');
+      peer.online = true;
+      paintPeerStatus();
+      return true;
+    } catch (err) {
+      peer.online = false;
+      paintPeerStatus();
+      showToast('发不出去，检查电脑和地址');
+      return false;
+    }
+  }
+
+  function peerReceive(message) {
+    const session = peerSession();
+    if (!session) return;
+
+    session.messages.push({
+      from: 'her',
+      text: message.text,
+      time: message.time || nowTime(),
+      state: 'ok',
+    });
+    saveState();
+
+    if (activeSession() === session) {
+      renderChat();
+      scrollChatToBottom();
+    } else {
+      session.unread = true;
+      if (sessionsSignature() !== sessionsSig) renderSessions();
+    }
+
+    /* 页面在后台时弹通知：这正是用来测「后台推送」的 */
+    if (document.visibilityState === 'hidden') {
+      notifyUser(session.name + ' 发来消息', message.text);
+    }
+  }
+
+  /** 拉一次增量（立即返回，不挂长连接） */
+  async function peerFetchOnce(gen) {
+    const url = peerUrl('/messages');
+    if (!url) return;
+
+    try {
+      const res = await fetch(
+        url + '?role=' + peer.role + '&cid=' + peerClientId() + '&since=' + peer.since,
+        { cache: 'no-store' }
+      );
+      if (gen !== peer.generation) return;
+      if (!res.ok) throw new Error('bad status');
+
+      const data = await res.json();
+      const list = data.messages || [];
+
+      if (!peer.online) {
+        peer.online = true;
+        paintPeerStatus();
+        if (activeSession().type === 'peer') renderChatStatusLine();
+      }
+
+      list.forEach(function (item) {
+        if (!item || !item.seq || item.seq <= peer.since) return;
+        peer.since = item.seq;
+        try {
+          window.localStorage.setItem(PEER_SINCE_KEY, String(peer.since));
+        } catch (err) {
+          /* ignore */
+        }
+        peerReceive(item);
+      });
+    } catch (err) {
+      if (gen !== peer.generation) return;
+      if (peer.online) {
+        peer.online = false;
+        paintPeerStatus();
+        if (activeSession().type === 'peer') renderChatStatusLine();
+      }
+    }
+  }
+
+  function peerLoop(gen) {
+    if (gen !== peer.generation) return;
+    peerFetchOnce(gen).then(function () {
+      if (gen !== peer.generation) return;
+      peer.timer = window.setTimeout(function () {
+        peerLoop(gen);
+      }, peer.online ? 1000 : 3000);
+    });
+  }
+
+  /** 首次连接先问服务端"现在到几号了"，否则会把历史消息当成新消息回放 */
+  async function peerBootstrap() {
+    if (peer.since) return;
+
+    try {
+      peer.since = Number(window.localStorage.getItem(PEER_SINCE_KEY) || 0);
+    } catch (err) {
+      peer.since = 0;
+    }
+    if (peer.since) return;
+
+    try {
+      const info = await fetch(peerUrl('/info'), { cache: 'no-store' }).then(function (r) {
+        return r.json();
+      });
+      peer.since = Number(info.last || 0);
+    } catch (err) {
+      peer.since = 0;
+    }
+  }
+
+  let peerStarting = false;
+
+  async function peerStart() {
+    if (!peerAddress() || peerStarting) return;
+    peerStarting = true;
+
+    await peerBootstrap();
+    peerStarting = false;
+
+    /* 换一代：旧循环醒来发现 gen 不匹配会自己退出 */
+    peer.generation += 1;
+    window.clearTimeout(peer.timer);
+    peerLoop(peer.generation);
+  }
+
+  function peerStop() {
+    peer.generation += 1;
+    window.clearTimeout(peer.timer);
+    peer.timer = 0;
+  }
+
+  /* 系统通知：App 里交给原生，浏览器里用 Notification API */
+  function notifyUser(title, body) {
+    if (window.DshNative) {
+      try {
+        window.DshNative.postMessage('notify:' + JSON.stringify({ title: title, body: body }));
+        return;
+      } catch (err) {
+        /* fall through */
+      }
+    }
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'granted') {
+      try {
+        new Notification(title, { body: body });
+      } catch (err) {
+        /* ignore */
+      }
+    }
+  }
+
+  function ensureNotifyPermission() {
+    if (window.DshNative) {
+      window.DshNative.postMessage('requestNotify');
+      return;
+    }
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().catch(function () {});
+    }
+  }
 
   /* ---- 悬浮菜单（仿微信：贴着被长按的元素弹出，带小三角） ---- */
   let popMenuNode = null;
@@ -816,7 +1201,11 @@
   function renderChat() {
     const session = activeSession();
     setText('chatTitle', session.name);
-    setTyping(replyTimer !== null && replySession === session);
+    if (session.type === 'peer') {
+      paintPeerStatus();
+    } else {
+      setTyping(replyTimer !== null && replySession === session);
+    }
 
     const avatar = document.getElementById('chatAvatar');
     if (avatar) {
@@ -900,7 +1289,10 @@
       /* 气泡下方：两边都显示时间；token 只在对方（左）显示 */
       const meta = el('div', 'msg-meta');
       meta.appendChild(el('span', 'msg-time', msg.time));
-      if (!isMe) meta.appendChild(el('span', 'msg-token', tokensLabel(msg)));
+      /* 只有跟小鱼的对话才显示消耗；对端设备发的消息不算 token */
+      if (!isMe && session.type !== 'peer') {
+        meta.appendChild(el('span', 'msg-token', tokensLabel(msg)));
+      }
       body.appendChild(meta);
 
       row.appendChild(body);
@@ -918,6 +1310,7 @@
     });
 
     updateSelectBar();
+    chatSig = chatSignature(session);
   }
 
   /** 气泡里的引用块 */
@@ -945,15 +1338,23 @@
       timer = window.setTimeout(function () {
         timer = null;
         row.classList.add('is-press');
+        const isVoice = msg.kind === 'voice';
+
         openPopMenu(
           bubble,
           [
+            /* 语音没有文字可复制，第一项换成「转文字」（功能待做） */
+            isVoice
+              ? { key: 'toText', label: '转文字' }
+              : { key: 'copy', label: '复制' },
             { key: 'quote', label: '引用' },
             { key: 'multi', label: '多选' },
             { key: 'delete', label: '删除', danger: true },
           ],
           function (key) {
-            if (key === 'quote') setQuote(msg, session);
+            if (key === 'copy') copyMessage(msg);
+            else if (key === 'toText') showToast('转文字 · 暂未开发');
+            else if (key === 'quote') setQuote(msg, session);
             else if (key === 'multi') enterSelect(index);
             else if (key === 'delete') deleteMessage(index);
           }
@@ -966,6 +1367,55 @@
     row.addEventListener('pointercancel', cancel);
     row.addEventListener('pointerleave', cancel);
     row.addEventListener('contextmenu', function (event) { event.preventDefault(); });
+  }
+
+  /** 复制一条消息：App 里走原生剪贴板（WebView 对 file:// 的 clipboard API 时好时坏），
+   *  浏览器里退回 navigator.clipboard，再不行用隐藏的 textarea + execCommand */
+  function copyMessage(msg) {
+    const text = msg.kind === 'voice' ? '[语音] ' + msg.duration + '"' : (msg.text || '');
+    if (!text) return;
+
+    const done = function () {
+      showToast('已复制');
+    };
+
+    /* 同步的 execCommand：必须留在点击的手势栈里才有效，所以先试它 */
+    const legacy = function () {
+      try {
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.setAttribute('readonly', '');
+        area.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+        document.body.appendChild(area);
+        area.select();
+        area.setSelectionRange(0, text.length);
+        const ok = document.execCommand('copy');
+        document.body.removeChild(area);
+        return ok;
+      } catch (err) {
+        return false;
+      }
+    };
+
+    if (window.DshNative && window.DshNative.postMessage) {
+      window.DshNative.postMessage('copy:' + text);
+      done();
+      return;
+    }
+
+    if (legacy()) {
+      done();
+      return;
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        showToast('复制失败');
+      });
+      return;
+    }
+
+    showToast('复制失败');
   }
 
   function setQuote(msg, session) {
@@ -1463,6 +1913,17 @@
     renderChat();
     scrollChatToBottom();
 
+    if (session.type === 'peer') {
+      /* 发到局域网的另一台设备，不模拟回复 */
+      peerSend(msg.text).then(function (ok) {
+        if (!ok) {
+          msg.state = 'failed';
+          renderChat();
+        }
+      });
+      return msg;
+    }
+
     if (msg.state === 'failed') {
       showToast('当前离线，消息没有发出去');
     } else {
@@ -1754,10 +2215,27 @@
     }
 
     if (tab) saveState();
-    if (page === 'chat') renderSessions();
+    if (page === 'chat') {
+      /* 数据没变就复用已经渲染好的 DOM，不重建、不重新解码头像 */
+      if (sessionsSignature() !== sessionsSig) renderSessions();
+    }
     if (page === 'chatdetail') {
-      renderChat();
+      if (chatSignature(activeSession()) !== chatSig) renderChat();
       scrollChatToBottom();
+
+      if (activeSession().type === 'peer') {
+        if (!peerAddress()) {
+          const answer = window.prompt(
+            '填电脑的地址（电脑上要开着 serve.py）\n例如 192.168.1.5:8080',
+            '192.168.1.5:8080'
+          );
+          if (answer) {
+            setPeerAddress(answer);
+            showToast('地址已保存');
+          }
+        }
+        peerStart();
+      }
     }
     if (page === 'editprofile') fillEditForm();
 
@@ -1770,11 +2248,84 @@
      ========================================================== */
 
   function bindEvents() {
+    /* App 里：等原生桥挂好，按存档里的开关状态把服务拉起来 */
+    let bgTries = 0;
+    (function bootBackgroundPoll() {
+      if (syncBackgroundPoll() || bgTries >= 4) return;
+      bgTries += 1;
+      window.setTimeout(bootBackgroundPoll, 700);
+    })();
+
     document.querySelectorAll('.tab-item').forEach(function (btn) {
       btn.addEventListener('click', function () {
         go(btn.dataset.tab);
       });
     });
+
+    /* 聊天头部的状态行：peer 会话里点一下能改地址 / 重连 */
+    const statusLine = document.getElementById('chatStatus');
+    if (statusLine) {
+      statusLine.addEventListener('click', function () {
+        if (activeSession().type !== 'peer') return;
+        const current = peerAddress();
+        const answer = window.prompt(
+          '电脑地址（留空表示断开）',
+          current || '192.168.1.5:8080'
+        );
+        if (answer === null) return;
+        setPeerAddress(answer);
+        peerStop();
+        if (answer) {
+          peer.since = 0;
+          peerStart();
+          showToast('正在连接 ' + answer);
+        } else {
+          peer.online = false;
+          paintPeerStatus();
+          showToast('已断开');
+        }
+      });
+    }
+
+    /* 测试通知 / 去系统设置 */
+    /* 后台推送总开关：App 里真正启停原生前台服务 */
+    const bgToggle = document.getElementById('bgDelivery');
+    if (bgToggle) {
+      bgToggle.checked = !!state.bgDelivery;
+      bgToggle.addEventListener('change', function () {
+        state.bgDelivery = !!bgToggle.checked;
+        saveState();
+
+        if (!state.bgDelivery) {
+          syncBackgroundPoll();
+          showToast('已关闭后台接收');
+          return;
+        }
+
+        ensureNotifyPermission();
+
+        if (!peerAddress()) {
+          showToast('先在「我的电脑」里填电脑地址');
+          return;
+        }
+        if (!syncBackgroundPoll()) {
+          showToast('浏览器里收不到后台通知，装 App 才行');
+          return;
+        }
+        showToast('已开启：关掉 App 也会收到通知');
+      });
+    }
+
+    const batteryBtn = document.getElementById('batteryBtn');
+    if (batteryBtn) {
+      batteryBtn.addEventListener('click', function () {
+        if (window.DshNative) {
+          window.DshNative.postMessage('openAppSettings');
+        } else {
+          showToast('浏览器里请在系统设置里手动放行');
+        }
+      });
+    }
 
     document.querySelectorAll('[data-goto]').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -1824,6 +2375,13 @@
 
     document.documentElement.dataset.env = ENV_APP ? 'app' : 'browser';
 
+    /* 毛玻璃（backdrop-filter）在移动端很贵：App 里、或核数很少的设备上关掉，
+       浏览器保持原样，方便你对比 */
+    const cores = navigator.hardwareConcurrency || 4;
+    if (ENV_APP || cores <= 4) {
+      document.documentElement.classList.add('low-fx');
+    }
+
     /* App 里天生没有浏览器工具栏，默认就按"全屏"处理：交给原生把状态栏也收起来。
        浏览器里默认不折腾（requestFullscreen 必须用户手势，自动调只会被拦）。 */
     function enterFullscreen() {
@@ -1837,6 +2395,42 @@
     }
 
     if (ENV_APP) enterFullscreen();
+
+    /* 浏览器专用：全屏隐藏地址栏。必须用户手势触发，所以挂成按钮（App 里这一行不显示） */
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    if (fullscreenBtn) {
+      const isFull = function () {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement);
+      };
+
+      const paintLabel = function () {
+        fullscreenBtn.textContent = isFull() ? '退出全屏' : '全屏';
+      };
+
+      fullscreenBtn.addEventListener('click', function () {
+        if (isFull()) {
+          const exit = document.exitFullscreen || document.webkitExitFullscreen;
+          if (exit) exit.call(document);
+          return;
+        }
+        const el = document.documentElement;
+        const request = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (!request) {
+          fullscreenBtn.textContent = '不支持';
+          return;
+        }
+        const ret = request.call(el);
+        if (ret && ret.catch) {
+          ret.catch(function () {
+            fullscreenBtn.textContent = '不支持';
+          });
+        }
+      });
+
+      document.addEventListener('fullscreenchange', paintLabel);
+      document.addEventListener('webkitfullscreenchange', paintLabel);
+      paintLabel();
+    }
 
     /* 断网 / 恢复：状态行跟着变，恢复时提示可重发 */
     window.addEventListener('online', function () {
@@ -1881,6 +2475,12 @@
         }
       });
     }
+
+    /* 切后台 / 关页面时把没落盘的存档写掉 */
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') flushSave();
+    });
+    window.addEventListener('pagehide', flushSave);
 
     /* iOS Safari 只有页面有 touchstart 监听时才会触发 :active，这里垫一个空的 */
     document.addEventListener('touchstart', function () {}, { passive: true });
@@ -2053,6 +2653,8 @@
       });
     }
     startSlotTimer();
+    warmImages();
+    if (peerAddress()) peerStart();
 
     bindEvents();
     window.history.replaceState({ page: 'home' }, '');

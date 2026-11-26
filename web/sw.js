@@ -1,8 +1,8 @@
 /* DSH · 鲸与鱼 —— 离线缓存
-   把外壳（html/css/js/图片）预缓存，装成 App 后断网也能打开。
-   注意：Service Worker 只在 https 或 localhost 下生效，局域网 http 不行。 */
+   网络优先：改完代码刷新就能看到；断网才退回缓存，所以装上以后离线也能开。
+   注意：Service Worker 只在 https 或 localhost 下生效，局域网 http 不注册。 */
 
-const CACHE = 'dsh-whale-v1';
+const CACHE = 'dsh-whale-v2';
 
 const ASSETS = [
   './',
@@ -53,26 +53,26 @@ self.addEventListener('fetch', function (event) {
 
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
+  /* 中继接口不缓存 */
+  if (url.pathname.indexOf('/messages') === 0) return;
+  if (url.pathname.indexOf('/send') === 0) return;
+  if (url.pathname.indexOf('/info') === 0) return;
 
-  /* 先给缓存（离线可用），后台顺手更新，下次打开就是新的 */
   event.respondWith(
-    caches.match(req, { ignoreSearch: true }).then(function (hit) {
-      const fetching = fetch(req)
-        .then(function (res) {
-          if (res && res.status === 200) {
-            const copy = res.clone();
-            caches.open(CACHE).then(function (cache) {
-              cache.put(req, copy);
-            });
-          }
-          return res;
-        })
-        .catch(function () {
-          /* 断网：有缓存就用缓存，没有就退回首页 */
+    fetch(req)
+      .then(function (res) {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(CACHE).then(function (cache) {
+            cache.put(req, copy);
+          });
+        }
+        return res;
+      })
+      .catch(function () {
+        return caches.match(req, { ignoreSearch: true }).then(function (hit) {
           return hit || caches.match('./index.html');
         });
-
-      return hit || fetching;
-    })
+      })
   );
 });

@@ -467,7 +467,6 @@
             <div class="row-main">
               <span class="row-title">后台推送</span>
               <span class="row-sub">关掉 App 也能收到她的消息</span>
-              <span class="row-state" id="bgHint">已开启 1 项设置</span>
             </div>
             <label class="switch">
               <input type="checkbox" id="bgDelivery" checked>
@@ -476,12 +475,8 @@
           </div>
 
           <div class="row row-static row-slim">
-            <span class="row-text">轮询中 · 3 秒前查过</span>
-            <button class="mini-pill" type="button">测试通知</button>
-          </div>
-          <div class="row row-static row-slim">
-            <span class="row-text">已允许后台运行，省电时通知可能延迟</span>
-            <button class="mini-pill" type="button">已就绪</button>
+            <span class="row-text">省电策略可能拦通知，去系统里放行</span>
+            <button class="mini-pill" type="button" id="batteryBtn">去设置</button>
           </div>
         </div>
 
@@ -493,7 +488,7 @@
             </span>
             <div class="row-main">
               <span class="row-title">消耗显示</span>
-              <span class="row-sub">对方回复的消耗：token 或金额</span>
+              <span class="row-sub">对方回复的消耗：Token 或金额</span>
               <span class="row-state" id="costHint">当前：Token</span>
             </div>
             <label class="switch">
@@ -501,8 +496,10 @@
               <span class="track"><span class="knob"></span></span>
             </label>
           </div>
-          <div class="row row-static row-slim">
-            <span class="row-text">金额按 ¥0.9 / 千 token 估算，仅作参考</span>
+          <!-- 只在浏览器里出现：App 里本来就是整屏，不需要这个开关 -->
+          <div class="row row-static row-slim browser-only">
+            <span class="row-text">手机测试：全屏隐藏浏览器工具栏</span>
+            <button class="mini-pill" type="button" id="fullscreenBtn">全屏</button>
           </div>
         </div>
 

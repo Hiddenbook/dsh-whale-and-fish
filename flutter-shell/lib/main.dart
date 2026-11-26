@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -69,9 +71,31 @@ class _WebShellState extends State<WebShell> {
       ..addJavaScriptChannel(
         'DshNative',
         onMessageReceived: (JavaScriptMessage message) {
+          final text = message.message;
+          if (text.startsWith('notify:')) {
+            _showNotification(text.substring(7));
+            return;
+          }
+          // 复制消息：走系统剪贴板，网页那边不用管权限
+          if (text.startsWith('copy:')) {
+            Clipboard.setData(ClipboardData(text: text.substring(5)));
+            return;
+          }
+          // 后台接收开关：peerPoll:1|http://192.168.1.5:8080
+          if (text.startsWith('peerPoll:')) {
+            _togglePeerPoll(text.substring(9));
+            return;
+          }
+
           switch (message.message) {
             case 'requestMic':
               _requestMicPermission();
+              break;
+            case 'requestNotify':
+              _requestNotifyPermission();
+              break;
+            case 'openAppSettings':
+              _native('openAppSettings');
               break;
             case 'checkUpdate':
               _checkUpdate(manual: true);
@@ -113,6 +137,58 @@ class _WebShellState extends State<WebShell> {
         if (mounted) _checkUpdate(manual: false);
       });
     });
+  }
+
+  static const MethodChannel _channel = MethodChannel('cn.jingyuyu.dsh_whale/install');
+
+  Future<void> _native(String method, [Map<String, dynamic>? args]) async {
+    try {
+      await _channel.invokeMethod<void>(method, args);
+    } catch (_) {
+      /* 原生不支持就算了 */
+    }
+  }
+
+  Future<void> _showNotification(String payload) async {
+    String title = '鲸与鱼';
+    String body = '';
+    try {
+      final data = jsonDecode(payload) as Map<String, dynamic>;
+      title = (data['title'] as String?) ?? title;
+      body = (data['body'] as String?) ?? '';
+    } catch (_) {
+      body = payload;
+    }
+    await _native('notify', {'title': title, 'body': body});
+  }
+
+  /// 网页说「后台接收开/关」，交给原生前台服务去做轮询
+  Future<void> _togglePeerPoll(String payload) async {
+    final parts = payload.split('|');
+    final on = parts.isNotEmpty && parts[0] == '1';
+    final base = parts.length > 1 ? parts[1].trim() : '';
+
+    if (!on || base.isEmpty) {
+      await _native('stopPeerPoll');
+      return;
+    }
+
+    try {
+      final granted = await _channel.invokeMethod<bool>('requestNotify');
+      if (granted == false) {
+        // 没有通知权限就没有意义，把开关状态回传给网页
+        await _web.runJavaScript('window.DshNotifyDenied && window.DshNotifyDenied()');
+        return;
+      }
+    } catch (_) {
+      /* 老版本没有这方法，继续尝试启动 */
+    }
+
+    await _native('startPeerPoll', {'base': base});
+  }
+
+  Future<void> _requestNotifyPermission() async {
+    await _native('requestNotify');
   }
 
   /// 网页要录音时会先发消息过来，这里申请系统麦克风权限再回传结果

@@ -45,11 +45,26 @@ body {
   /* 定住页面：软键盘弹出时 iOS 不会把整页往上推 */
   position: fixed;
   inset: 0;
+  /* 全站禁止长按选字 / 系统选择菜单（输入框在下面单独放开） */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--ink);
   background: #223B66;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+}
+
+/* 输入类元素要能正常选字、拖光标，别的都不给选 */
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 button,
@@ -116,16 +131,21 @@ button {
   min-height: 0;
 }
 
+/* 页面常驻：切换只改 visibility，不重新挂载，图片不会重新解码、也没有过渡动画，
+   观感就是 QQ 那种"瞬移"，不会因为重排/重绘产生掉帧错觉 */
 .page {
   position: absolute;
   inset: 0;
-  display: none;
+  display: flex;
   flex-direction: column;
   overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .page.is-active {
-  display: flex;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .scroller {
@@ -281,6 +301,17 @@ button {
   border-radius: 50%;
   background: #38C976;
   box-shadow: 0 0 0 2.5px rgba(56, 201, 118, 0.26);
+}
+
+/* 「我的电脑 / 我的手机」头像：和「我的」页同一个素材。
+   不放大裁剪，整幅图缩进圆里，头不会显得过大 */
+.avatar-user {
+  background-color: #F3E6D0;
+  background-image: url("assets/avatar-user.jpg");
+  background-repeat: no-repeat;
+  background-size: contain;
+  background-position: 50% 50%;
+  border-radius: 50%;
 }
 
 .avatar-photo {
@@ -834,6 +865,15 @@ button {
   background: rgba(206, 226, 248, 0.55);
 }
 
+/* 置顶的会话：整行浅灰底 + 排到最前面，扫一眼就能挑出来（微信/QQ 的做法） */
+.session.is-pinned {
+  background: #EDF1F8;
+}
+
+.session.is-pinned:active {
+  background: #E1E8F3;
+}
+
 /* 设置/我的里的行：.group 有 14px 内边距，直接铺底色会内缩一圈、露出白边，
    所以用伪元素向左右各撑出 14px，颜色才是从卡片左边到右边的一整条 */
 .row {
@@ -943,6 +983,23 @@ button {
   color: #3C6FB5;
 }
 
+
+/* 只在浏览器里显示的项（App 里没有浏览器工具栏，这类开关不用出现） */
+html[data-env="app"] .browser-only {
+  display: none !important;
+}
+
+/* App / 低配设备上关掉毛玻璃：backdrop-filter 在移动端很贵，切页和滚动都会掉帧 */
+html.low-fx .session-panel,
+html.low-fx .glass-btn,
+html.low-fx .mini-panel,
+html.low-fx .empty-card,
+html.low-fx .card,
+html.low-fx .voice-sheet,
+html.low-fx .pop-menu {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
 
 /* ===========================================================
    悬浮菜单（长按会话 / 长按消息，仿微信那种贴着元素的小卡片）
