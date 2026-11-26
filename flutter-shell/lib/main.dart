@@ -66,8 +66,17 @@ class _WebShellState extends State<WebShell> {
       ..addJavaScriptChannel(
         'DshNative',
         onMessageReceived: (JavaScriptMessage message) {
-          if (message.message == 'checkUpdate') {
-            _checkUpdate(manual: true);
+          switch (message.message) {
+            case 'checkUpdate':
+              _checkUpdate(manual: true);
+              break;
+            // 网页在 App 里默认要求"全屏"：把状态栏、导航栏收起来
+            case 'fullscreen':
+              SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+              break;
+            case 'exitFullscreen':
+              SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+              break;
           }
         },
       )

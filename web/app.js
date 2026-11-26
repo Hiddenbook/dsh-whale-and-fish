@@ -1288,29 +1288,27 @@
       });
     }
 
-    /* 手机测试用：全屏（隐藏地址栏等浏览器 UI；iOS Safari 不支持，用「添加到主屏幕」代替） */
-    const fullBtn = document.getElementById('fullscreenBtn');
-    if (fullBtn) {
-      fullBtn.addEventListener('click', function () {
-        const doc = document;
-        const el = doc.documentElement;
-        if (doc.fullscreenElement || doc.webkitFullscreenElement) {
-          (doc.exitFullscreen || doc.webkitExitFullscreen).call(doc);
-          return;
-        }
-        const req = el.requestFullscreen || el.webkitRequestFullscreen;
-        if (!req) {
-          fullBtn.textContent = '不支持';
-          return;
-        }
-        const ret = req.call(el);
-        if (ret && ret.catch) {
-          ret.catch(function () {
-            fullBtn.textContent = '不支持';
-          });
-        }
-      });
+    /* ---------- 运行环境：装在 App 里，还是手机浏览器？ ----------
+       放在 App 的 WebView 里时，外层会注入 DshNative 这个对象；
+       浏览器里没有。UI 里不再露开关，行为按环境自动定。 */
+    const ENV_APP = typeof window.DshNative !== 'undefined' ||
+      /DshWhale/i.test(navigator.userAgent || '');
+
+    document.documentElement.dataset.env = ENV_APP ? 'app' : 'browser';
+
+    /* App 里天生没有浏览器工具栏，默认就按"全屏"处理：交给原生把状态栏也收起来。
+       浏览器里默认不折腾（requestFullscreen 必须用户手势，自动调只会被拦）。 */
+    function enterFullscreen() {
+      if (!ENV_APP) return false;
+      try {
+        window.DshNative.postMessage('fullscreen');
+        return true;
+      } catch (err) {
+        return false;
+      }
     }
+
+    if (ENV_APP) enterFullscreen();
 
     /* 断网 / 恢复：状态行跟着变，恢复时提示可重发 */
     window.addEventListener('online', function () {

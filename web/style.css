@@ -75,7 +75,8 @@ button {
   height: 100dvh;
   margin: 0 auto;
   overflow: hidden;
-  padding-top: env(safe-area-inset-top, 0px);
+  /* App 里状态栏被收起时 env() 为 0，留 10px 免得顶到摄像头开孔 */
+  padding-top: max(env(safe-area-inset-top, 0px), 10px);
   background: linear-gradient(180deg, #27406C 0%, #7C9EC4 22%, #DCE9F8 40%, #C8DBF0 100%);
 }
 
