@@ -885,75 +885,6 @@ button {
 
 /* 会话搜索条 */
 
-/* ===========================================================
-   会话长按菜单（底部小弹窗）
-   =========================================================== */
-.menu-mask {
-  position: absolute;
-  inset: 0;
-  z-index: 45;
-  background: rgba(12, 24, 44, 0.32);
-  opacity: 0;
-  transition: opacity 0.18s ease;
-}
-
-.menu-mask.is-on {
-  opacity: 1;
-}
-
-.menu-mask[hidden] {
-  display: none;
-}
-
-.row-menu {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  /* 让开底部 tab 栏（64px）再留 16px */
-  bottom: calc(80px + max(env(safe-area-inset-bottom, 0px), var(--safe-bottom, 0px)));
-  z-index: 46;
-  padding: 6px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.97);
-  box-shadow: 0 18px 40px rgba(14, 34, 66, 0.28);
-  transform: translateY(14px) scale(0.97);
-  opacity: 0;
-  transition: transform 0.2s cubic-bezier(0.22, 0.9, 0.3, 1), opacity 0.18s ease;
-}
-
-.row-menu.is-on {
-  transform: translateY(0) scale(1);
-  opacity: 1;
-}
-
-.row-menu[hidden] {
-  display: none;
-}
-
-.row-menu-item {
-  display: block;
-  width: 100%;
-  padding: 13px 12px;
-  border: 0;
-  border-radius: 12px;
-  background: none;
-  font-size: 14.5px;
-  color: var(--ink);
-  text-align: center;
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-
-.row-menu-item:active {
-  background: rgba(206, 226, 248, 0.7);
-}
-
-.row-menu-cancel {
-  margin-top: 6px;
-  border-top: 1px solid var(--hair);
-  border-radius: 0 0 12px 12px;
-  color: var(--ink-3);
-}
 
 /* 特别关注：头像右下角的小星标 */
 .star-badge {
@@ -1010,6 +941,289 @@ button {
   background: rgba(76, 134, 219, 0.12);
   font-size: 10px;
   color: #3C6FB5;
+}
+
+
+/* ===========================================================
+   悬浮菜单（长按会话 / 长按消息，仿微信那种贴着元素的小卡片）
+   =========================================================== */
+.pop-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 58;
+  background: transparent;
+}
+
+.pop-menu {
+  position: absolute;
+  z-index: 59;
+  min-width: 152px;
+  padding: 6px;
+  border: 0.5px solid var(--card-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.985);
+  box-shadow: 0 16px 36px rgba(14, 34, 66, 0.24);
+  transform: scale(0.9);
+  opacity: 0;
+  transition: opacity 0.12s ease, transform 0.14s cubic-bezier(0.22, 0.9, 0.3, 1);
+  transform-origin: var(--origin, 50% 100%);
+}
+
+.pop-menu.is-on {
+  transform: scale(1);
+  opacity: 1;
+}
+
+.pop-menu::after {
+  content: "";
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  background: #FFFFFF;
+  border: 0.5px solid var(--card-line);
+  transform: rotate(45deg);
+}
+
+.pop-menu[data-arrow="bottom"]::after {
+  bottom: -6px;
+  left: calc(var(--arrow-x, 50%) - 5px);
+  border-top: 0;
+  border-left: 0;
+}
+
+.pop-menu[data-arrow="top"]::after {
+  top: -6px;
+  left: calc(var(--arrow-x, 50%) - 5px);
+  border-bottom: 0;
+  border-right: 0;
+}
+
+.pop-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font-size: 14.5px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pop-menu-item:active {
+  background: rgba(206, 226, 248, 0.7);
+}
+
+.pop-menu-item.is-danger {
+  color: #D2453F;
+}
+
+.pop-menu-item.is-danger:active {
+  background: rgba(252, 225, 224, 0.8);
+}
+
+/* 语音气泡：点击播放 */
+.bubble-voice.has-audio {
+  cursor: pointer;
+}
+
+.bubble-voice.is-playing {
+  box-shadow: 0 0 0 2px rgba(76, 134, 219, 0.35);
+}
+
+.bubble-voice.is-playing svg {
+  animation: voicePulse 0.9s ease-in-out infinite;
+}
+
+@keyframes voicePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* 消息：长按选中态 */
+.msg.is-press .bubble {
+  background: #E4EEFB;
+}
+
+/* 多选 */
+.chat-list.is-select .msg {
+  padding-left: 34px;
+}
+
+.msg-check {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid #B9CCE4;
+  background: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.msg.is-selected .msg-check {
+  border-color: #4C86DB;
+  background: #4C86DB;
+}
+
+.msg.is-selected .msg-check::after {
+  content: "";
+  width: 6px;
+  height: 10px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.msg {
+  position: relative;
+}
+
+/* 引用块（气泡里上方那条） */
+.bubble-quote {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(120, 155, 200, 0.12);
+  font-size: 12px;
+  line-height: 1.45;
+  color: #5D7B9E;
+}
+
+.bubble-quote b {
+  font-weight: 500;
+  color: #3E5B84;
+}
+
+.bubble-quote span {
+  color: #6C82A0;
+  display: block;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 我方（蓝色）气泡里的引用块：换成浅色半透明，否则看不清 */
+.msg-me .bubble-quote {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.msg-me .bubble-quote b {
+  color: #FFFFFF;
+}
+
+.msg-me .bubble-quote span {
+  color: rgba(255, 255, 255, 0.86);
+}
+
+/* 引用条（输入框上方） */
+.quote-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 6px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 0.5px solid rgba(196, 218, 244, 0.95);
+}
+
+.quote-bar[hidden] {
+  display: none;
+}
+
+.quote-line {
+  flex: none;
+  width: 3px;
+  height: 26px;
+  border-radius: 2px;
+  background: #4C86DB;
+}
+
+.quote-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #5D7B9E;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quote-text b {
+  font-weight: 500;
+  color: #3E5B84;
+  margin-right: 4px;
+}
+
+.quote-close {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(120, 155, 200, 0.16);
+  color: #5D7B9E;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* 多选底部条 */
+.select-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px calc(10px + max(env(safe-area-inset-bottom, 0px), var(--safe-bottom, 0px)));
+  border-top: 1px solid rgba(210, 226, 245, 0.9);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.select-bar[hidden] {
+  display: none;
+}
+
+.select-cancel,
+.select-del {
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.select-cancel {
+  background: rgba(206, 226, 248, 0.6);
+  color: #3E5B84;
+}
+
+.select-count {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  color: #6C82A0;
+}
+
+.select-del {
+  background: #E5484D;
+  color: #FFFFFF;
+}
+
+.select-del:disabled {
+  background: rgba(229, 72, 77, 0.35);
 }
 
 /* 今日心情空态 */
@@ -1513,6 +1727,10 @@ button {
 }
 
 /* 聊天详情隐藏 tab 栏后，输入栏直接贴屏幕底边，给刘海屏留一点安全区 */
+.composer[hidden] {
+  display: none;
+}
+
 .phone.is-sub .composer {
   padding-bottom: calc(10px + max(env(safe-area-inset-bottom, 0px), var(--safe-bottom, 0px)));
 }

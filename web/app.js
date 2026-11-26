@@ -148,25 +148,53 @@
     }
   }
 
-  /* ---- 软键盘：外壳高度只跟「可视区域」走，横幅高度不变，只压缩消息区 ---- */
+  /* ---- 软键盘 ----------------------------------------------------------
+     键盘弹起：外壳压到 visualViewport 高度，输入栏贴着键盘；
+     键盘收起：把 height 还给 100dvh，别一帧帧往回放，否则底部会露出一截空白。
+     ------------------------------------------------------------------- */
   let lastViewportH = 0;
+  let viewportRaf = 0;
 
-  function syncViewportHeight() {
+  function applyViewportHeight() {
+    viewportRaf = 0;
+
     const phone = document.querySelector('.phone');
     if (!phone) return;
 
     const vv = window.visualViewport;
-    const h = Math.round(vv ? vv.height : window.innerHeight);
-    if (!h || h === lastViewportH) return;
+    const vh = Math.round(vv ? vv.height : window.innerHeight);
+    const wh = Math.round(window.innerHeight);
+    if (!vh) return;
 
-    const shrunk = lastViewportH && h < lastViewportH - 60;
-    lastViewportH = h;
-    phone.style.height = h + 'px';
+    const keyboard = wh - vh;
+
+    if (keyboard > 80) {
+      /* 键盘在：外壳跟可视区一样高（输入栏就贴在键盘上面） */
+      if (vh !== lastViewportH) phone.style.height = vh + 'px';
+      phone.classList.add('is-keyboard');
+    } else if (phone.classList.contains('is-keyboard')) {
+      /* 键盘刚收起：立刻交还给 CSS 的 100dvh，避免逐帧回弹留下色带 */
+      phone.style.height = '';
+      phone.classList.remove('is-keyboard');
+      phone.classList.remove('is-kb-settled');
+      window.requestAnimationFrame(function () {
+        phone.classList.add('is-kb-settled');
+        scrollChatToBottom();
+      });
+    }
+
+    const shrankTo = lastViewportH && vh < lastViewportH - 60;
+    lastViewportH = vh;
 
     const page = document.getElementById('page-chat');
-    if (shrunk && page && page.classList.contains('is-active')) {
+    if (shrankTo && page && page.classList.contains('is-active')) {
       scrollChatToBottom(); /* 键盘顶上来时把最后一条消息露出来 */
     }
+  }
+
+  function syncViewportHeight() {
+    if (viewportRaf) return;
+    viewportRaf = window.requestAnimationFrame(applyViewportHeight);
   }
 
   function bindViewportHeight() {
@@ -217,6 +245,9 @@
     costMode: false, /* false = 显示 token（默认）；true = 显示 ¥ */
     sessionFilter: 'all',
     search: '',
+    quote: null, /* 正在引用的消息 */
+    selectMode: false,
+    selected: [], /* 多选中的消息下标 */
     activeId: SESSIONS[0].id,
     user: {
       name: USER_DEFAULT.name,
@@ -252,21 +283,82 @@
         if (typeof saved.user[k] === 'string' && saved.user[k]) state.user[k] = saved.user[k];
       });
     }
+
+    /* 聊天记录：按 id 对回会话，消息多就整段恢复 */
+    if (Array.isArray(saved.chats)) {
+      saved.chats.forEach(function (savedChat) {
+        const session = SESSIONS.find(function (item) { return item.id === savedChat.id; });
+        if (!session) return;
+        if (typeof savedChat.pinned === 'boolean') session.pinned = savedChat.pinned;
+        if (typeof savedChat.starred === 'boolean') session.starred = savedChat.starred;
+        if (typeof savedChat.unread === 'boolean') session.unread = savedChat.unread;
+        if (Array.isArray(savedChat.messages)) {
+          session.messages = savedChat.messages
+            .filter(function (m) { return m && (m.text || m.kind); })
+            .map(function (m) {
+              return {
+                from: m.from === 'me' ? 'me' : 'her',
+                text: typeof m.text === 'string' ? m.text : '',
+                time: m.time || '',
+                kind: m.kind === 'voice' ? 'voice' : undefined,
+                duration: m.duration || undefined,
+                audio: typeof m.audio === 'string' ? m.audio : undefined,
+                quote: m.quote && m.quote.text ? { who: m.quote.who || '', text: m.quote.text } : undefined,
+                state: m.state === 'failed' ? 'failed' : 'ok',
+              };
+            });
+        }
+      });
+    }
+  }
+
+  /** 把会话整理成可存的样子（语音带 audio dataURL，可能很大） */
+  function packChats(dropAudio) {
+    return SESSIONS.map(function (session) {
+      return {
+        id: session.id,
+        pinned: !!session.pinned,
+        starred: !!session.starred,
+        unread: !!session.unread,
+        messages: session.messages.map(function (msg) {
+          const out = { from: msg.from, time: msg.time, state: msg.state || 'ok' };
+          if (msg.kind) out.kind = msg.kind;
+          if (msg.text) out.text = msg.text;
+          if (msg.duration) out.duration = msg.duration;
+          if (msg.quote) out.quote = msg.quote;
+          if (msg.audio && !dropAudio) out.audio = msg.audio;
+          return out;
+        }),
+      };
+    });
+  }
+
+  function writeSave(payload) {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }
 
   function saveState() {
+    const base = {
+      tab: state.tab,
+      bgDelivery: state.bgDelivery,
+      costMode: state.costMode,
+      user: state.user,
+      chatSavedAt: Date.now(),
+    };
+
     try {
-      window.localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          tab: state.tab,
-          bgDelivery: state.bgDelivery,
-          costMode: state.costMode,
-          user: state.user,
-        })
-      );
+      writeSave(Object.assign({ chats: packChats(false) }, base));
     } catch (err) {
-      /* 存不了就算了，不打断使用 */
+      /* 空间不够：先把语音录音丢掉再存（聊天文字不能丢） */
+      try {
+        writeSave(Object.assign({ chats: packChats(true) }, base));
+      } catch (err2) {
+        try {
+          writeSave(base);
+        } catch (err3) {
+          /* 真存不了就算了，不打断使用 */
+        }
+      }
     }
   }
 
@@ -467,6 +559,7 @@
 
       const row = el('button', 'session');
       row.type = 'button';
+      row.dataset.id = session.id;
 
       const avatar = el('div', 'session-avatar');
       paintSessionAvatar(avatar, session);
@@ -509,7 +602,9 @@
         pressTimer = window.setTimeout(function () {
           pressTimer = null;
           longPressed = true;
-          openRowMenu(session);
+          openSessionMenu(session, row);
+          /* 只挡住"松手那一下"的误触，过一会儿恢复正常点击 */
+          window.setTimeout(function () { longPressed = false; }, 700);
         }, 480);
         if (event.pointerId !== undefined && row.setPointerCapture) {
           try { row.setPointerCapture(event.pointerId); } catch (err) {}
@@ -540,57 +635,183 @@
   /* ---- 会话长按菜单 ---- */
   let menuTarget = null;
 
-  function openRowMenu(session) {
-    const menu = document.getElementById('rowMenu');
-    const mask = document.getElementById('menuMask');
-    if (!menu || !mask) return;
+  /* ---- 悬浮菜单（仿微信：贴着被长按的元素弹出，带小三角） ---- */
+  let popMenuNode = null;
+  let popMaskNode = null;
+  let popOnPick = null;
 
-    menuTarget = session;
-    menu.hidden = false;
-    mask.hidden = false;
-    window.requestAnimationFrame(function () {
-      menu.classList.add('is-on');
-      mask.classList.add('is-on');
+  function closePopMenu() {
+    if (popMaskNode) {
+      popMaskNode.remove();
+      popMaskNode = null;
+    }
+    if (popMenuNode) {
+      const node = popMenuNode;
+      popMenuNode = null;
+      node.classList.remove('is-on');
+      window.setTimeout(function () { node.remove(); }, 140);
+    }
+    popOnPick = null;
+    document.querySelectorAll('.msg.is-press').forEach(function (n) {
+      n.classList.remove('is-press');
     });
   }
 
-  function closeRowMenu() {
-    const menu = document.getElementById('rowMenu');
-    const mask = document.getElementById('menuMask');
-    if (!menu || !mask) return;
+  /** items: [{ key, label, danger }]；anchorRect 传元素或矩形 */
+  function openPopMenu(anchor, items, onPick) {
+    closePopMenu();
 
-    menu.classList.remove('is-on');
-    mask.classList.remove('is-on');
-    window.setTimeout(function () {
-      menu.hidden = true;
-      mask.hidden = true;
-    }, 200);
-    menuTarget = null;
+    const host = document.querySelector('.phone');
+    if (!host) return;
+
+    const box = anchor.nodeType ? anchor.getBoundingClientRect() : anchor;
+    const hostBox = host.getBoundingClientRect();
+
+    const menu = el('div', 'pop-menu');
+    items.forEach(function (item) {
+      const btn = el('button', 'pop-menu-item' + (item.danger ? ' is-danger' : ''), item.label);
+      btn.type = 'button';
+      btn.addEventListener('click', function () {
+        const pick = onPick;
+        closePopMenu();
+        if (pick) pick(item.key);
+      });
+      menu.appendChild(btn);
+    });
+
+    const mask = el('div', 'pop-mask');
+    mask.addEventListener('click', closePopMenu);
+
+    host.appendChild(mask);
+    host.appendChild(menu);
+
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    const gap = 12;
+
+    let top = box.top - hostBox.top - mh - gap;
+    let arrow = 'bottom';
+    if (top < 8) {
+      top = box.bottom - hostBox.top + gap;
+      arrow = 'top';
+    }
+
+    let left = box.left - hostBox.left + box.width / 2 - mw / 2;
+    left = Math.max(8, Math.min(left, host.clientWidth - mw - 8));
+
+    menu.style.top = top + 'px';
+    menu.style.left = left + 'px';
+    menu.dataset.arrow = arrow;
+    menu.style.setProperty('--arrow-x', (box.left + box.width / 2 - left) + 'px');
+    menu.style.setProperty('--origin', '50% ' + (arrow === 'bottom' ? '100%' : '0%'));
+
+    popMenuNode = menu;
+    popMaskNode = mask;
+    popOnPick = onPick;
+
+    window.requestAnimationFrame(function () { menu.classList.add('is-on'); });
   }
 
-  function handleMenuAction(action) {
-    const session = menuTarget;
-    closeRowMenu();
-    if (!session || action === 'cancel') return;
-
-    if (action === 'pin') {
-      session.pinned = !session.pinned;
-      renderSessions();
-      showToast(session.pinned ? '已置顶聊天' : '已取消置顶');
-      return;
-    }
-    if (action === 'star') {
-      session.starred = !session.starred;
-      renderSessions(); /* 头像角标要跟着刷 */
-      showToast(session.starred ? '已设为特别关注' : '已取消特别关注');
-      return;
-    }
-    if (action === 'unread') {
-      session.unread = true;
-      renderSessions();
-      showToast('已标记未读');
-    }
+  /* ---- 会话长按：置顶 / 特别关注 / 标为未读 ---- */
+  function openSessionMenu(session, anchor) {
+    openPopMenu(
+      anchor,
+      [
+        { key: 'pin', label: session.pinned ? '取消置顶' : '置顶聊天' },
+        { key: 'star', label: session.starred ? '取消特别关注' : '设置特别关注' },
+        { key: 'unread', label: '标为未读' },
+        { key: 'clear', label: '清除聊天记录', danger: true },
+      ],
+      function (key) {
+        if (key === 'pin') {
+          session.pinned = !session.pinned;
+          saveState();
+          renderSessions();
+          showToast(session.pinned ? '已置顶聊天' : '已取消置顶');
+          return;
+        }
+        if (key === 'star') {
+          session.starred = !session.starred;
+          renderSessions();
+          showToast(session.starred ? '已设为特别关注' : '已取消特别关注');
+          return;
+        }
+        if (key === 'unread') {
+          session.unread = true;
+          saveState();
+          renderSessions();
+          showToast('已标为未读');
+          return;
+        }
+        if (key === 'clear') {
+          confirmClearChat(session);
+        }
+      }
+    );
   }
+
+  /** 清空这台手机上的聊天记录（不碰 DSH 那边），要再点一次确认 */
+  function confirmClearChat(session) {
+    if (!session.messages.length) {
+      showToast('这个会话本来就没有记录');
+      return;
+    }
+
+    openPopMenu(
+      document.getElementById('sessionList').querySelector('[data-id="' + session.id + '"]') ||
+        document.getElementById('sessionList'),
+      [
+        { key: 'yes', label: '确认清除（' + session.messages.length + ' 条）', danger: true },
+        { key: 'no', label: '取消' },
+      ],
+      function (key) {
+        if (key !== 'yes') return;
+        session.messages = [];
+        session.unread = false;
+        if (state.activeId === session.id) {
+          state.selectMode = false;
+          state.selected = [];
+        }
+        saveState();
+        renderSessions();
+        if (state.activeId === session.id) renderChat();
+        showToast('已清除本机聊天记录');
+      }
+    );
+  }
+
+  /* App 里按系统返回键时，先问这里：有浮层/多选/引用就先关掉，别直接退页面 */
+  window.DshHandleBack = function () {
+    if (document.querySelector('.pop-menu')) {
+      closePopMenu();
+      return true;
+    }
+    if (state.selectMode) {
+      exitSelect();
+      return true;
+    }
+    if (state.quote) {
+      state.quote = null;
+      renderQuoteBar();
+      return true;
+    }
+
+    const chat = document.getElementById('page-chat');
+    if (chat && (chat.classList.contains('is-voice') || chat.classList.contains('is-plus'))) {
+      voiceOpen(false);
+      plusOpen(false);
+      return true;
+    }
+
+    const searchBar = document.getElementById('searchBar');
+    if (searchBar && !searchBar.hidden) {
+      const cancel = document.getElementById('searchCancel');
+      if (cancel) cancel.click();
+      return true;
+    }
+
+    return false;
+  };
 
   function renderChat() {
     const session = activeSession();
@@ -606,17 +827,30 @@
 
     const list = document.getElementById('chatList');
     list.textContent = '';
-
     list.classList.toggle('is-empty', !session.messages.length);
+    list.classList.toggle('is-select', !!state.selectMode);
 
     if (!session.messages.length) {
       list.appendChild(el('p', 'chat-empty', EMPTY.chat));
+      updateSelectBar();
       return;
     }
 
-    session.messages.forEach(function (msg) {
+    session.messages.forEach(function (msg, index) {
       const isMe = msg.from === 'me';
       const row = el('div', 'msg ' + (isMe ? 'msg-me' : 'msg-her'));
+      row.dataset.idx = index;
+
+      if (state.selectMode) {
+        row.classList.add('is-selectable');
+        if (state.selected.indexOf(index) !== -1) row.classList.add('is-selected');
+        row.appendChild(el('span', 'msg-check'));
+        row.addEventListener('click', function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleSelect(index);
+        });
+      }
 
       /* 对方：头像在左 */
       if (!isMe) {
@@ -644,18 +878,26 @@
 
       const body = el('div', 'msg-body');
 
+      let bubble;
       if (msg.kind === 'voice') {
-        const vb = el('div', 'bubble bubble-voice');
-        vb.innerHTML =
+        bubble = el('div', 'bubble bubble-voice' + (msg.audio ? ' has-audio' : ''));
+        bubble.innerHTML =
           '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.6 10v4M8.4 7.4v9.2M12 4.8v14.4M15.6 8v8M19.4 10.4v3.2"/></svg>';
-        vb.appendChild(el('span', 'voice-dur', msg.duration + '"'));
-        vb.style.minWidth = Math.min(190, 66 + msg.duration * 14) + 'px';
-        body.appendChild(vb);
+        bubble.appendChild(el('span', 'voice-dur', msg.duration + '"'));
+        bubble.style.minWidth = Math.min(190, 66 + msg.duration * 14) + 'px';
+        bubble.addEventListener('click', function (event) {
+          if (state.selectMode) return;
+          event.stopPropagation();
+          playVoice(msg, bubble);
+        });
       } else {
-        body.appendChild(el('div', 'bubble', msg.text));
+        bubble = el('div', 'bubble');
+        if (msg.quote) bubble.appendChild(quoteBlock(msg.quote));
+        bubble.appendChild(el('span', 'bubble-text', msg.text));
       }
+      body.appendChild(bubble);
 
-      /* 气泡下方：两边都显示时间；token 只在对方（左）显示，代表这次回复的消耗 */
+      /* 气泡下方：两边都显示时间；token 只在对方（左）显示 */
       const meta = el('div', 'msg-meta');
       meta.appendChild(el('span', 'msg-time', msg.time));
       if (!isMe) meta.appendChild(el('span', 'msg-token', tokensLabel(msg)));
@@ -670,8 +912,144 @@
         row.appendChild(mine);
       }
 
+      if (!state.selectMode) bindBubbleMenu(row, bubble, msg, index, session);
+
       list.appendChild(row);
     });
+
+    updateSelectBar();
+  }
+
+  /** 气泡里的引用块 */
+  function quoteBlock(quote) {
+    const box = el('div', 'bubble-quote');
+    box.appendChild(el('b', '', quote.who + '：'));
+    box.appendChild(el('span', '', quote.text));
+    return box;
+  }
+
+  /* ---------------- 消息长按：引用 / 删除 / 多选 ---------------- */
+
+  function bindBubbleMenu(row, bubble, msg, index, session) {
+    let timer = null;
+
+    const cancel = function () {
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+    };
+
+    row.addEventListener('pointerdown', function () {
+      cancel();
+      timer = window.setTimeout(function () {
+        timer = null;
+        row.classList.add('is-press');
+        openPopMenu(
+          bubble,
+          [
+            { key: 'quote', label: '引用' },
+            { key: 'multi', label: '多选' },
+            { key: 'delete', label: '删除', danger: true },
+          ],
+          function (key) {
+            if (key === 'quote') setQuote(msg, session);
+            else if (key === 'multi') enterSelect(index);
+            else if (key === 'delete') deleteMessage(index);
+          }
+        );
+      }, 420);
+    });
+
+    row.addEventListener('pointerup', cancel);
+    row.addEventListener('pointermove', cancel);
+    row.addEventListener('pointercancel', cancel);
+    row.addEventListener('pointerleave', cancel);
+    row.addEventListener('contextmenu', function (event) { event.preventDefault(); });
+  }
+
+  function setQuote(msg, session) {
+    const who = msg.from === 'me' ? (state.user.name || '我') : session.name;
+    const text = msg.kind === 'voice' ? '[语音] ' + msg.duration + '"' : msg.text;
+    state.quote = { who: who, text: text };
+    renderQuoteBar();
+    const input = document.getElementById('chatInput');
+    if (input) input.focus();
+  }
+
+  function renderQuoteBar() {
+    const bar = document.getElementById('quoteBar');
+    if (!bar) return;
+    const q = state.quote;
+    bar.hidden = !q;
+    if (!q) return;
+    setText('quoteWho', q.who);
+    setText('quoteBody', q.text);
+  }
+
+  function deleteMessage(index) {
+    const session = activeSession();
+    if (index < 0 || index >= session.messages.length) return;
+    session.messages.splice(index, 1);
+    if (state.selected.indexOf(index) !== -1) state.selected = [];
+    saveState();
+    renderChat();
+    showToast('已删除');
+  }
+
+  /* ---------------- 多选 ---------------- */
+
+  function enterSelect(index) {
+    state.selectMode = true;
+    state.selected = typeof index === 'number' ? [index] : [];
+    if (state.quote) {
+      state.quote = null;
+      renderQuoteBar();
+    }
+    renderChat();
+  }
+
+  function exitSelect() {
+    state.selectMode = false;
+    state.selected = [];
+    renderChat();
+  }
+
+  function toggleSelect(index) {
+    const at = state.selected.indexOf(index);
+    if (at === -1) state.selected.push(index);
+    else state.selected.splice(at, 1);
+    renderChat();
+  }
+
+  function updateSelectBar() {
+    const bar = document.getElementById('selectBar');
+    const composer = document.querySelector('.composer');
+    if (!bar) return;
+
+    const on = !!state.selectMode;
+    bar.hidden = !on;
+    if (composer) composer.hidden = on;
+
+    const count = document.getElementById('selectCount');
+    const del = document.getElementById('selectDel');
+    if (count) count.textContent = '已选 ' + state.selected.length + ' 条';
+    if (del) del.disabled = !state.selected.length;
+  }
+
+  function deleteSelected() {
+    if (!state.selected.length) return;
+    const session = activeSession();
+    state.selected
+      .slice()
+      .sort(function (a, b) { return b - a; })
+      .forEach(function (idx) { session.messages.splice(idx, 1); });
+    const n = state.selected.length;
+    state.selected = [];
+    state.selectMode = false;
+    saveState();
+    renderChat();
+    showToast('已删除 ' + n + ' 条');
   }
 
   function scrollChatToBottom() {
@@ -840,11 +1218,140 @@
     paintVoiceToggle();
   }
 
+  /* ---- 真录音：拿麦克风 → MediaRecorder → dataURL 存在消息里 ---- */
+  let micStream = null;
+  let micRecorder = null;
+  let micChunks = [];
+  let micAsk = null;
+
+  function askMicPermission() {
+    if (micAsk) return micAsk;
+    micAsk = new Promise(function (resolve) {
+      if (!window.DshNative) {
+        resolve(true); /* 浏览器里直接让 getUserMedia 自己弹权限 */
+        return;
+      }
+      window.DshMicAnswer = function (ok) { resolve(!!ok); };
+      try {
+        window.DshNative.postMessage('requestMic');
+      } catch (err) {
+        resolve(true);
+      }
+      window.setTimeout(function () { resolve(true); }, 4000);
+    });
+    return micAsk;
+  }
+
+  async function beginAudioCapture() {
+    if (!navigator.mediaDevices || !window.MediaRecorder) return;
+
+    await askMicPermission();
+
+    try {
+      if (!micStream) {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+    } catch (err) {
+      showToast('没有麦克风权限，只能发一个空语音');
+      return;
+    }
+
+    micChunks = [];
+    let options;
+    try {
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        options = { mimeType: 'audio/webm;codecs=opus' };
+      }
+    } catch (err) {
+      options = undefined;
+    }
+
+    try {
+      micRecorder = new MediaRecorder(micStream, options);
+      micRecorder.ondataavailable = function (event) {
+        if (event.data && event.data.size) micChunks.push(event.data);
+      };
+      micRecorder.start();
+    } catch (err) {
+      micRecorder = null;
+    }
+  }
+
+  function finishAudioCapture() {
+    return new Promise(function (resolve) {
+      if (!micRecorder || micRecorder.state === 'inactive') {
+        resolve(null);
+        return;
+      }
+      const finish = function () {
+        micRecorder = null;
+        if (!micChunks.length) {
+          resolve(null);
+          return;
+        }
+        const blob = new Blob(micChunks, { type: micChunks[0].type || 'audio/webm' });
+        micChunks = [];
+        if (!blob.size) {
+          resolve(null);
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = function () { resolve(String(reader.result)); };
+        reader.onerror = function () { resolve(null); };
+        reader.readAsDataURL(blob);
+      };
+
+      micRecorder.onstop = finish;
+      try {
+        micRecorder.stop();
+      } catch (err) {
+        resolve(null);
+      }
+    });
+  }
+
+  let playingAudio = null;
+
+  function playVoice(msg, bubble) {
+    if (!msg.audio) {
+      showToast('这条语音没录上（旧版本发的）');
+      return;
+    }
+
+    if (playingAudio) {
+      playingAudio.pause();
+      playingAudio = null;
+      document.querySelectorAll('.bubble-voice.is-playing').forEach(function (node) {
+        node.classList.remove('is-playing');
+      });
+    }
+
+    const audio = new Audio(msg.audio);
+    playingAudio = audio;
+    bubble.classList.add('is-playing');
+
+    const clear = function () {
+      bubble.classList.remove('is-playing');
+      if (playingAudio === audio) playingAudio = null;
+    };
+
+    audio.onended = clear;
+    audio.onerror = function () {
+      clear();
+      showToast('播放失败');
+    };
+    audio.play().catch(function () {
+      clear();
+      showToast('播放失败');
+    });
+  }
+
   function startRecording(event) {
     if (rec) return;
     if (event && event.cancelable) event.preventDefault();
 
     rec = { start: Date.now(), y: event ? event.clientY : 0, cancel: false, timer: null };
+    beginAudioCapture();
 
     /* 浮层要浮在「输入栏」上方，所以位置按面板 + 输入栏高度算 */
     const panel = document.getElementById('recPanel');
@@ -890,13 +1397,16 @@
       return;
     }
     if (raw < 0.6) {
+      finishAudioCapture();
       showToast('说话时间太短');
       return;
     }
 
     const seconds = Math.max(1, Math.round(raw));
     const session = activeSession();
-    pushMine(session, { kind: 'voice', duration: seconds });
+    finishAudioCapture().then(function (audio) {
+      pushMine(session, { kind: 'voice', duration: seconds, audio: audio || undefined });
+    });
   }
 
   /* ---- 测试用的固定回复：发什么都回同一段，延迟 0.9s 模拟对方在打字 ---- */
@@ -932,6 +1442,7 @@
     replyTimer = window.setTimeout(function () {
       replyTimer = null;
       session.messages.push({ from: 'her', text: AUTO_REPLY, time: nowTime() });
+      saveState();
 
       if (activeSession() === session) {
         setTyping(false);
@@ -948,6 +1459,7 @@
       extra
     );
     session.messages.push(msg);
+    saveState();
     renderChat();
     scrollChatToBottom();
 
@@ -965,6 +1477,7 @@
       return;
     }
     msg.state = 'sending';
+    saveState();
     renderChat();
 
     window.setTimeout(function () {
@@ -979,8 +1492,12 @@
     const text = input.value.trim();
     if (!text) return;
 
+    const quote = state.quote;
     input.value = '';
-    pushMine(activeSession(), { text: text });
+    state.quote = null;
+    renderQuoteBar();
+
+    pushMine(activeSession(), quote ? { text: text, quote: quote } : { text: text });
   }
 
   /* ==========================================================
@@ -1196,8 +1713,19 @@
       plusOpen(false);
     }
 
-    /* 离开会话列表就把长按菜单收起来 */
-    if (page !== 'chat') closeRowMenu();
+    /* 离开页面时收起悬浮菜单；离开聊天页还要退出多选与引用 */
+    closePopMenu();
+    if (page !== 'chatdetail') {
+      if (state.selectMode) {
+        state.selectMode = false;
+        state.selected = [];
+        updateSelectBar();
+      }
+      if (state.quote) {
+        state.quote = null;
+        renderQuoteBar();
+      }
+    }
 
     /* 离开会话列表就把搜索条收起来，回来是干净状态 */
     if (page !== 'chat' && state.search) {
@@ -1325,14 +1853,19 @@
     });
 
     /* 长按菜单：点遮罩 / 取消 关闭，点其它项执行动作 */
-    const menuMask = document.getElementById('menuMask');
-    const rowMenu = document.getElementById('rowMenu');
-    if (menuMask) menuMask.addEventListener('click', function () { closeRowMenu(); });
-    if (rowMenu) {
-      rowMenu.addEventListener('click', function (event) {
-        const btn = event.target.closest('[data-menu]');
-        if (!btn) return;
-        handleMenuAction(btn.dataset.menu);
+    /* 多选操作条 */
+    const selectCancel = document.getElementById('selectCancel');
+    if (selectCancel) selectCancel.addEventListener('click', exitSelect);
+
+    const selectDel = document.getElementById('selectDel');
+    if (selectDel) selectDel.addEventListener('click', deleteSelected);
+
+    /* 引用条：取消引用 */
+    const quoteClose = document.getElementById('quoteClose');
+    if (quoteClose) {
+      quoteClose.addEventListener('click', function () {
+        state.quote = null;
+        renderQuoteBar();
       });
     }
 

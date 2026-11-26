@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import 'update.dart';
 
@@ -69,6 +71,9 @@ class _WebShellState extends State<WebShell> {
         'DshNative',
         onMessageReceived: (JavaScriptMessage message) {
           switch (message.message) {
+            case 'requestMic':
+              _requestMicPermission();
+              break;
             case 'checkUpdate':
               _checkUpdate(manual: true);
               break;
@@ -95,12 +100,32 @@ class _WebShellState extends State<WebShell> {
       )
       ..loadFlutterAsset(_assetPath);
 
+    // WebView 里的 getUserMedia 要用的录音资源：交给系统授权，不在网页层拦
+    final platform = _web.platform;
+    if (platform is AndroidWebViewController) {
+      platform.setOnPlatformPermissionRequest((request) async {
+        await request.grant();
+      });
+    }
+
     // 启动 2 秒后静默查一次，有新版才弹窗
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future<void>.delayed(const Duration(seconds: 2), () {
         if (mounted) _checkUpdate(manual: false);
       });
     });
+  }
+
+  /// 网页要录音时会先发消息过来，这里申请系统麦克风权限再回传结果
+  Future<void> _requestMicPermission() async {
+    bool ok = false;
+    try {
+      final status = await Permission.microphone.request();
+      ok = status.isGranted;
+    } catch (_) {
+      ok = false;
+    }
+    await _web.runJavaScript('window.DshMicAnswer && window.DshMicAnswer($ok)');
   }
 
   /// 状态栏高度：WebView 里 env(safe-area-inset-top) 一般是 0，
@@ -121,6 +146,18 @@ class _WebShellState extends State<WebShell> {
 
   /// 返回键：先在网页里退一层（二级页 → 一级页 → 首页），退无可退才退出 App
   Future<void> _handleBack() async {
+    // 先问网页：有浮层 / 多选 / 引用 / 语音面板时，让它吃掉这次返回
+    bool consumed = false;
+    try {
+      final result = await _web.runJavaScriptReturningResult(
+        'window.DshHandleBack ? window.DshHandleBack() : false',
+      );
+      consumed = result.toString().replaceAll('"', '').trim() == 'true';
+    } catch (_) {
+      consumed = false;
+    }
+    if (consumed) return;
+
     if (await _web.canGoBack()) {
       await _web.goBack();
       return;

@@ -268,7 +268,7 @@
         <div class="banner-photo"></div>
         <div class="topbar">
           <button class="glass-btn back js-back" type="button" aria-label="返回">‹</button>
-          <button class="glass-btn" type="button" aria-label="更多">⋯</button>
+          <button class="glass-btn" type="button" aria-label="更多" data-toast="更多功能 · 暂未开发">⋯</button>
         </div>
         <div class="chat-id">
           <div class="chat-avatar avatar-photo" id="chatAvatar"></div>
@@ -292,6 +292,13 @@
           <div class="chat-list" id="chatList"></div>
         </div>
 
+        <!-- 引用条：长按消息选「引用」后出现在输入栏上方 -->
+        <div class="quote-bar" id="quoteBar" hidden>
+          <span class="quote-line" aria-hidden="true"></span>
+          <div class="quote-text"><b id="quoteWho"></b><span id="quoteBody"></span></div>
+          <button class="quote-close" type="button" id="quoteClose" aria-label="取消引用">×</button>
+        </div>
+
         <div class="composer">
           <button class="pill-btn" type="button" id="voiceToggle" aria-label="语音" aria-expanded="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9.2" y="3.6" width="5.6" height="9.4" rx="2.8"/><path d="M6 11.4a6 6 0 0 0 12 0M12 17.4v3"/></svg>
@@ -304,6 +311,13 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.4 11.6 19.6 4.8 14.4 19.4l-2.6-5.6z"/></svg>
             <span>发送</span>
           </button>
+        </div>
+
+        <!-- 多选模式下的底部操作条（替换输入栏） -->
+        <div class="select-bar" id="selectBar" hidden>
+          <button class="select-cancel" type="button" id="selectCancel">取消</button>
+          <span class="select-count" id="selectCount">已选 0 条</span>
+          <button class="select-del" type="button" id="selectDel" disabled>删除</button>
         </div>
 
         <!-- 语音面板打开时盖住消息区，点这里任何位置都退回打字 -->
@@ -572,15 +586,6 @@
   </main>
 
   <!-- 底部 tab 栏 -->
-  <!-- 会话长按菜单 -->
-  <div class="menu-mask" id="menuMask" hidden></div>
-  <div class="row-menu" id="rowMenu" role="menu" hidden>
-    <button class="row-menu-item" type="button" role="menuitem" data-menu="pin">置顶聊天</button>
-    <button class="row-menu-item" type="button" role="menuitem" data-menu="star">设置特别关注</button>
-    <button class="row-menu-item" type="button" role="menuitem" data-menu="unread">标记未读</button>
-    <button class="row-menu-item row-menu-cancel" type="button" role="menuitem" data-menu="cancel">取消</button>
-  </div>
-
   <div class="toast" id="chatToast" role="status" aria-live="polite"></div>
 
   <nav class="tabbar" aria-label="主导航">
