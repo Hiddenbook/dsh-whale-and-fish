@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
@@ -120,8 +119,9 @@ class _WebShellState extends State<WebShell> {
   Future<void> _requestMicPermission() async {
     bool ok = false;
     try {
-      final status = await Permission.microphone.request();
-      ok = status.isGranted;
+      const channel = MethodChannel('cn.jingyuyu.dsh_whale/install');
+      final granted = await channel.invokeMethod<bool>('requestMic');
+      ok = granted ?? false;
     } catch (_) {
       ok = false;
     }
