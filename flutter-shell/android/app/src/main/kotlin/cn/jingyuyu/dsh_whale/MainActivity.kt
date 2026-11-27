@@ -150,8 +150,9 @@ class MainActivity : FlutterActivity() {
             .build()
 
         try {
-            NotificationManagerCompat.from(this)
-                .notify(System.currentTimeMillis().toInt(), notification)
+            // 同一个来源反复通知时用固定 id 覆盖，别堆成一串（时间戳当 id 会条条新增）
+            val id = 20000 + (Math.abs(title.hashCode()) % 10000)
+            NotificationManagerCompat.from(this).notify(id, notification)
         } catch (e: SecurityException) {
             // 没授权就算了
         }

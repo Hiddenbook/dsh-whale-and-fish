@@ -440,7 +440,7 @@
           </button>
         </div>
 
-        <p class="version">DSH · 鲸与鱼 · 0.1.0</p>
+        <p class="version" id="versionLabel">DSH · 鲸与鱼</p>
 
       </div>
     </section>
@@ -584,6 +584,45 @@
 
   <!-- 底部 tab 栏 -->
   <div class="toast" id="chatToast" role="status" aria-live="polite"></div>
+
+  <!-- 自绘输入弹层（替代 window.prompt：没有系统动画，直接出现在最终位置） -->
+  <div class="ask" id="askLayer" hidden role="dialog" aria-modal="true" aria-labelledby="askTitle">
+    <div class="ask-mask" data-ask="cancel"></div>
+    <div class="ask-card">
+      <p class="ask-title" id="askTitle">填电脑的地址</p>
+      <p class="ask-hint" id="askHint"></p>
+      <input class="ask-input" id="askInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="ask-actions">
+        <button class="ask-btn" type="button" data-ask="cancel">取消</button>
+        <button class="ask-btn ask-primary" type="button" data-ask="ok">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 检查更新：界面在网页里画，原生只负责下载 + 拉起安装器 -->
+  <div class="ask upd" id="updateLayer" hidden role="dialog" aria-modal="true" aria-labelledby="updTitle">
+    <div class="ask-mask" data-upd="later"></div>
+    <div class="ask-card upd-card">
+      <div class="upd-head">
+        <span class="upd-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 3.6a8.4 8.4 0 1 0 0 16.8 8.4 8.4 0 0 0 0-16.8zm0 3.6v5.2l3.4 2"/></svg>
+        </span>
+        <div class="upd-headtext">
+          <p class="ask-title" id="updTitle">发现新版本</p>
+          <p class="upd-sub" id="updSub"></p>
+        </div>
+      </div>
+      <div class="upd-notes" id="updNotes"></div>
+      <div class="upd-progress" id="updProgress" hidden>
+        <div class="upd-bar"><i id="updBar"></i></div>
+        <p class="upd-percent" id="updPercent">准备中…</p>
+      </div>
+      <div class="ask-actions upd-actions" id="updActions">
+        <button class="ask-btn" type="button" data-upd="later">稍后</button>
+        <button class="ask-btn ask-primary" type="button" data-upd="now">立即更新</button>
+      </div>
+    </div>
+  </div>
 
   <nav class="tabbar" aria-label="主导航">
     <button class="tab-item is-on" type="button" data-tab="home" aria-selected="true">

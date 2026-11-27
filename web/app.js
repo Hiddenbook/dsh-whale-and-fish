@@ -6,6 +6,11 @@
 (function () {
   'use strict';
 
+  /* 版本号：这两行由 stamp-version.py 按 pubspec.yaml 自动改写，别手改。
+     TEST_BUILD = 上次发布之后第几次改动；0 表示正式版，不显示括号。 */
+  const APP_VERSION = '0.1.5';
+  const TEST_BUILD = 0;
+
   /* ==========================================================
      一、假数据（后端接入时替换这一段即可）
      ========================================================== */
@@ -175,11 +180,115 @@
   let lastViewportH = 0;
   let viewportRaf = 0;
 
+  let kbTimer = 0;
+
+  /** 键盘动画停下后再设高度：一步到位，避免逐帧重排 */
+  function applyKeyboardHeight() {
+    kbTimer = 0;
+    const phone = document.querySelector('.phone');
+    if (!phone || !phone.classList.contains('is-keyboard')) return;
+
+    const vv = window.visualViewport;
+    const vh = Math.round(vv ? vv.height : window.innerHeight);
+    if (!vh) return;
+
+    phone.style.height = vh + 'px';
+    lastViewportH = vh;
+    scrollChatToBottom();
+  }
+
+  let appVhLock = 0;   /* App 里外壳锁定的高度（启动时记一次） */
+  let appKbLast = 0;
+  let nativeKeyboard = false;  /* 原生上报过键盘高度后，就不再自己从视口算 */
+
+  /** 键盘高度的统一入口：原生上报和 visualViewport 两条路都走这里 */
+  function applyKeyboardHeight(kb) {
+    const phone = document.querySelector('.phone');
+    if (!phone) return;
+
+    const root = document.documentElement;
+    kb = Math.max(0, Math.round(kb || 0));
+
+    /* 原生上报的是键盘动画的逐帧高度（0 → 900 之间十几个中间值），
+       阈值卡在 80 会让动画的头尾各丢一截，看着就是"慢半拍"。
+       浏览器自己从视口算的那条路会夹带地址栏伸缩，留一点死区。 */
+    const openAt = nativeKeyboard ? 0 : 80;
+
+    if (kb > openAt) {
+      root.classList.remove('kb-off');
+      if (!phone.classList.contains('is-keyboard')) phone.classList.add('is-keyboard');
+
+      /* 输入栏每帧跟着键盘走：transform 不触发重排 */
+      root.style.setProperty('--kb', kb + 'px');
+
+      /* 列表留白要重排，等键盘停稳再改 */
+      if (kb !== appKbLast) {
+        appKbLast = kb;
+        if (kbTimer) window.clearTimeout(kbTimer);
+        kbTimer = window.setTimeout(function () {
+          kbTimer = 0;
+          root.style.setProperty('--kb-pad', kb + 'px');
+          scrollChatToBottom();
+        }, 130);
+      }
+      return;
+    }
+
+    if (!phone.classList.contains('is-keyboard')) return;
+
+    if (kbTimer) {
+      window.clearTimeout(kbTimer);
+      kbTimer = 0;
+    }
+    appKbLast = 0;
+    root.style.setProperty('--kb', '0px');
+    root.style.setProperty('--kb-pad', '0px');
+    phone.classList.remove('is-keyboard');
+    root.classList.add('kb-off');
+    phone.classList.add('kb-resetting');
+    window.requestAnimationFrame(function () {
+      window.requestAnimationFrame(function () {
+        phone.classList.remove('kb-resetting');
+        scrollChatToBottom();
+      });
+    });
+  }
+
+  /* 原生（Flutter）上报的键盘高度（px）。
+     原生拿到的是系统 IME insets，跟键盘动画同一条时间线，
+     比等 WebView 自己 resize 完再算要快一截。 */
+  window.DshKeyboard = function (px) {
+    const phone = document.querySelector('.phone');
+    if (!phone) return;
+
+    nativeKeyboard = true;
+    applyKeyboardHeight(px);
+  };
+
   function applyViewportHeight() {
     viewportRaf = 0;
 
     const phone = document.querySelector('.phone');
     if (!phone) return;
+
+    /* ---------------- App（WebView）----------------
+       WebView 会随键盘缩小，如果外壳跟着 100dvh 变，每帧都要重排整页 → 卡。
+       所以外壳高度锁在启动时的值，键盘缩小时页面布局完全不动（超出部分被裁掉），
+       只把输入栏用 transform 抬到键盘上方。键盘高度 = 锁定高度 - 当前视口高度，
+       等它稳定再写一次，中间不留过渡帧。 */
+    if (document.documentElement.dataset.env === 'app') {
+      if (nativeKeyboard) return;   /* 已经在用原生上报的高度，别再抢 */
+
+      const vv = window.visualViewport;
+      const vh = Math.round(vv ? vv.height : window.innerHeight);
+      if (!appVhLock) appVhLock = Math.round(window.innerHeight);
+      if (!vh) return;
+
+      const kb = Math.max(0, appVhLock - vh);
+      applyKeyboardHeight(kb);
+      return;
+    }
+
 
     const vv = window.visualViewport;
     const vh = Math.round(vv ? vv.height : window.innerHeight);
@@ -189,11 +298,23 @@
     const keyboard = wh - vh;
 
     if (keyboard > 80) {
-      /* 键盘在：外壳跟可视区一样高（输入栏就贴在键盘上面） */
-      if (vh !== lastViewportH) phone.style.height = vh + 'px';
       phone.classList.add('is-keyboard');
+
+      /* 键盘弹起是有动画的，visualViewport.height 会连着变几十帧。
+         逐帧改外壳高度会让整页跟着重排（列表、输入栏一起动），看起来就是掉帧。
+         这里改成"等它停下来再一次性设到位"——中间页面不动，稳定后一步到位。 */
+      if (vh !== lastViewportH) {
+        if (kbTimer) window.clearTimeout(kbTimer);
+        kbTimer = window.setTimeout(applyKeyboardHeight, 120);
+      } else if (phone.style.height !== vh + 'px' && !kbTimer) {
+        phone.style.height = vh + 'px';
+      }
     } else if (phone.classList.contains('is-keyboard')) {
       /* 键盘刚收起：立刻交还给 CSS 的 100dvh，避免逐帧回弹留下色带 */
+      if (kbTimer) {
+        window.clearTimeout(kbTimer);
+        kbTimer = 0;
+      }
       phone.style.height = '';
       phone.classList.remove('is-keyboard');
       phone.classList.remove('is-kb-settled');
@@ -206,9 +327,11 @@
     const shrankTo = lastViewportH && vh < lastViewportH - 60;
     lastViewportH = vh;
 
+    /* 键盘弹起过程中不要一帧一帧地滚列表（那也是掉帧的观感），
+       等高度稳定后由 applyKeyboardHeight() 滚一次 */
     const page = document.getElementById('page-chat');
-    if (shrankTo && page && page.classList.contains('is-active')) {
-      scrollChatToBottom(); /* 键盘顶上来时把最后一条消息露出来 */
+    if (!phone.classList.contains('is-keyboard') && shrankTo && page && page.classList.contains('is-active')) {
+      scrollChatToBottom();
     }
   }
 
@@ -218,6 +341,17 @@
   }
 
   function bindViewportHeight() {
+    /* App 里先把外壳高度钉住：之后 WebView 怎么缩，页面布局都不动。
+       这里自己判断一次（不依赖 bindEvents 里那套，避免顺序问题）。 */
+    const inApp = typeof window.DshNative !== 'undefined' ||
+      document.documentElement.dataset.env === 'app';
+
+    if (inApp) {
+      document.documentElement.dataset.env = 'app';
+      appVhLock = Math.round(window.innerHeight);
+      document.documentElement.style.setProperty('--vh-lock', appVhLock + 'px');
+    }
+
     syncViewportHeight();
     window.addEventListener('resize', syncViewportHeight);
     window.addEventListener('orientationchange', syncViewportHeight);
@@ -234,6 +368,13 @@
       img.src = src;
       if (img.decode) img.decode().catch(function () {});
     });
+  }
+
+  /** 底部那行版本号：测试包带 (build)，正式版只有版本号 */
+  function paintVersion() {
+    const node = document.getElementById('versionLabel');
+    if (!node) return;
+    node.textContent = 'DSH · 鲸与鱼 · ' + APP_VERSION + (TEST_BUILD ? '(' + TEST_BUILD + ')' : '');
   }
 
   function startSlotTimer() {
@@ -321,6 +462,10 @@
         if (typeof savedChat.pinned === 'boolean') session.pinned = savedChat.pinned;
         if (typeof savedChat.starred === 'boolean') session.starred = savedChat.starred;
         if (typeof savedChat.unread === 'boolean') session.unread = savedChat.unread;
+        /* 未读条数：老存档里只有布尔值，就按 1 条算 */
+        session.unreadCount = typeof savedChat.unreadCount === 'number'
+          ? Math.max(0, savedChat.unreadCount)
+          : (savedChat.unread ? 1 : 0);
         if (Array.isArray(savedChat.messages)) {
           session.messages = savedChat.messages
             .filter(function (m) { return m && (m.text || m.kind); })
@@ -349,6 +494,7 @@
         pinned: !!session.pinned,
         starred: !!session.starred,
         unread: !!session.unread,
+        unreadCount: session.unreadCount || 0,
         messages: session.messages.map(function (msg) {
           const out = { from: msg.from, time: msg.time, state: msg.state || 'ok' };
           if (msg.kind) out.kind = msg.kind;
@@ -569,6 +715,25 @@
     }
   }
 
+  /* 未读数：微信那种"红圆 + 数字"，钉在头像右上角 */
+  function paintUnreadBadge(node, count) {
+    if (!node) return;
+
+    const n = Math.max(0, count || 0);
+    const old = node.querySelector('.avatar-unread');
+
+    if (!n) {
+      if (old) old.remove();
+      return;
+    }
+
+    const badge = old || el('span', 'avatar-unread');
+    const text = n > 99 ? '99+' : String(n);
+    if (badge.textContent !== text) badge.textContent = text;
+    badge.setAttribute('aria-label', n + ' 条未读');
+    if (!old) node.appendChild(badge);
+  }
+
   /* ---------------- 渲染签名：数据没变就不重建 DOM ----------------
      每次进聊天页都重建会话列表，会把头像、缩略图全部重新解码，
      观感就是"从模糊到清晰"地显影一下；比较签名后跳过重建，切页就是瞬移 */
@@ -588,7 +753,7 @@
           session.id,
           session.pinned ? 1 : 0,
           session.starred ? 1 : 0,
-          session.unread ? 1 : 0,
+          session.unreadCount || 0,
           session.messages.length,
           tail(session),
         ].join(',');
@@ -649,6 +814,7 @@
       const avatar = el('div', 'session-avatar');
       paintSessionAvatar(avatar, session);
       paintStarBadge(avatar, !!session.starred);
+      paintUnreadBadge(avatar, session.unreadCount || 0);
       row.appendChild(avatar);
 
       const main = el('div', 'session-main');
@@ -667,7 +833,6 @@
       main.appendChild(el('div', 'session-preview', preview));
 
       row.appendChild(main);
-      if (session.unread) row.appendChild(el('span', 'session-unread'));
       row.appendChild(el('span', 'chev', '›'));
 
       /* 长按 480ms 出菜单；松手/滑动取消，长按后不触发进入聊天 */
@@ -705,8 +870,9 @@
           longPressed = false;
           return;
         }
-        if (session.unread) {
+        if (session.unread || session.unreadCount) {
           session.unread = false;
+          session.unreadCount = 0;
           renderSessions();
         }
         state.activeId = session.id;
@@ -886,11 +1052,15 @@
       scrollChatToBottom();
     } else {
       session.unread = true;
+      session.unreadCount = (session.unreadCount || 0) + 1;
       if (sessionsSignature() !== sessionsSig) renderSessions();
     }
 
-    /* 页面在后台时弹通知：这正是用来测「后台推送」的 */
-    if (document.visibilityState === 'hidden') {
+    /* 页面在后台时弹通知：这正是用来测「后台推送」的。
+       但开了「后台推送」之后，原生前台服务自己会弹，这边再弹就成了两条一样的通知，
+       所以那种情况这里闭嘴，只让服务弹。 */
+    const nativeHandles = !!(state.bgDelivery && window.DshNative && peerAddress());
+    if (!nativeHandles && document.visibilityState === 'hidden') {
       notifyUser(session.name + ' 发来消息', message.text);
     }
   }
@@ -1123,6 +1293,7 @@
         }
         if (key === 'unread') {
           session.unread = true;
+          if (!session.unreadCount) session.unreadCount = 1;
           saveState();
           renderSessions();
           showToast('已标为未读');
@@ -1153,6 +1324,7 @@
         if (key !== 'yes') return;
         session.messages = [];
         session.unread = false;
+        session.unreadCount = 0;
         if (state.activeId === session.id) {
           state.selectMode = false;
           state.selected = [];
@@ -1167,6 +1339,16 @@
 
   /* App 里按系统返回键时，先问这里：有浮层/多选/引用就先关掉，别直接退页面 */
   window.DshHandleBack = function () {
+    const updLayer = document.getElementById('updateLayer');
+    if (updLayer && !updLayer.hidden) {
+      if (!updBusy) closeUpdateLayer();
+      return true;
+    }
+    const askLayer = document.getElementById('askLayer');
+    if (askLayer && !askLayer.hidden) {
+      closeAsk(null);
+      return true;
+    }
     if (document.querySelector('.pop-menu')) {
       closePopMenu();
       return true;
@@ -2225,16 +2407,21 @@
 
       if (activeSession().type === 'peer') {
         if (!peerAddress()) {
-          const answer = window.prompt(
-            '填电脑的地址（电脑上要开着 serve.py）\n例如 192.168.1.5:8080',
-            '192.168.1.5:8080'
-          );
-          if (answer) {
-            setPeerAddress(answer);
-            showToast('地址已保存');
-          }
+          askText({
+            title: '填电脑的地址',
+            hint: '电脑上要开着 serve.py',
+            value: '',
+            placeholder: '例如 10.184.48.28:8080',
+            onDone: function (answer) {
+              if (!answer) return;
+              setPeerAddress(answer);
+              showToast('地址已保存');
+              peerStart();
+            },
+          });
+        } else {
+          peerStart();
         }
-        peerStart();
       }
     }
     if (page === 'editprofile') fillEditForm();
@@ -2247,7 +2434,199 @@
      十、事件绑定
      ========================================================== */
 
+  /* ---------------- 自绘输入弹层 ----------------
+     为什么不用 window.prompt：它是系统对话框，在 WebView 里弹出时有一段过渡动画，
+     滚动/键盘弹出时明显掉帧，而且样式完全改不了。这里 display 一变就直接到位。 */
+  let askDone = null;
+
+  function askText(options) {
+    const layer = document.getElementById('askLayer');
+    const hint = document.getElementById('askHint');
+    const input = document.getElementById('askInput');
+    if (!layer || !input) return;
+
+    setText('askTitle', options.title || '');
+    if (options.hint) {
+      hint.hidden = false;
+      setText('askHint', options.hint);
+    } else {
+      hint.hidden = true;
+    }
+
+    input.value = options.value || '';
+    input.placeholder = options.placeholder || '';
+    input.type = options.password ? 'password' : 'text';
+
+    askDone = options.onDone || null;
+    layer.hidden = false;
+    input.focus();
+    try {
+      input.setSelectionRange(0, input.value.length);
+    } catch (err) {
+      /* 某些输入法不支持，忽略 */
+    }
+  }
+
+  function closeAsk(value) {
+    const layer = document.getElementById('askLayer');
+    if (!layer || layer.hidden) return;
+    layer.hidden = true;
+
+    const cb = askDone;
+    askDone = null;
+
+    const input = document.getElementById('askInput');
+    if (input) input.blur();
+
+    if (cb) cb(value);
+  }
+
+  function bindAskLayer() {
+    const layer = document.getElementById('askLayer');
+    if (!layer) return;
+
+    layer.addEventListener('click', function (event) {
+      const target = event.target.closest('[data-ask]');
+      if (!target) return;
+      if (target.dataset.ask === 'ok') {
+        const input = document.getElementById('askInput');
+        closeAsk(input ? input.value.trim() : '');
+      } else {
+        closeAsk(null);
+      }
+    });
+
+    const input = document.getElementById('askInput');
+    if (input) {
+      input.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          closeAsk(input.value.trim());
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          closeAsk(null);
+        }
+      });
+    }
+  }
+
+  /* ==========================================================
+     检查更新
+     原生那边只做三件事：查版本、下载、拉起安装器；
+     界面（发现新版本 / 进度 / 失败）都在网页里画，跟整套配色一致。
+     ========================================================== */
+  let updBusy = false;
+
+  function paintUpdateProgress(percent) {
+    const prog = document.getElementById('updProgress');
+    const bar = document.getElementById('updBar');
+    const txt = document.getElementById('updPercent');
+    const actions = document.getElementById('updActions');
+
+    const p = Math.max(0, Math.min(1, Number(percent) || 0));
+    if (prog) prog.hidden = false;
+    if (actions) actions.hidden = true;
+    if (bar) bar.style.width = (p * 100).toFixed(1) + '%';
+    if (txt) {
+      txt.textContent = p <= 0
+        ? '准备中…'
+        : (p >= 1 ? '下载完成，正在打开安装界面…' : Math.round(p * 100) + '%');
+    }
+    updBusy = true;
+  }
+
+  function openUpdateLayer(info) {
+    const layer = document.getElementById('updateLayer');
+    if (!layer) return;
+
+    setText('updTitle', '发现新版本 ' + (info.version || ''));
+    setText('updSub', '当前 ' + (info.current || '') + (info.size ? ' · 安装包 ' + info.size : ''));
+
+    const notes = document.getElementById('updNotes');
+    if (notes) notes.textContent = info.notes || '这次没写更新说明，装上就知道了。';
+
+    const prog = document.getElementById('updProgress');
+    if (prog) prog.hidden = true;
+    const bar = document.getElementById('updBar');
+    if (bar) bar.style.width = '0%';
+    const actions = document.getElementById('updActions');
+    if (actions) actions.hidden = false;
+
+    updBusy = false;
+    layer.hidden = false;
+  }
+
+  function closeUpdateLayer() {
+    const layer = document.getElementById('updateLayer');
+    if (layer) layer.hidden = true;
+    updBusy = false;
+  }
+
+  /* 原生回调入口：checking / latest / error / available / progress / done / fail */
+  window.DshUpdate = function (kind, data) {
+    data = data || {};
+
+    if (kind === 'checking') {
+      showToast('正在检查更新…');
+      return;
+    }
+    if (kind === 'latest') {
+      showToast('已是最新版本' + (data.version ? ' ' + data.version : ''));
+      return;
+    }
+    if (kind === 'error') {
+      showToast(data.message || '检查更新失败，请检查网络');
+      return;
+    }
+    if (kind === 'available') {
+      openUpdateLayer(data);
+      return;
+    }
+    if (kind === 'progress') {
+      paintUpdateProgress(data.percent);
+      return;
+    }
+    if (kind === 'done') {
+      closeUpdateLayer();
+      showToast('下载完成，正在打开安装界面…');
+      return;
+    }
+    if (kind === 'fail') {
+      closeUpdateLayer();
+      showToast(data.message || '更新失败，稍后再试');
+    }
+  };
+
+  function bindUpdateLayer() {
+    const layer = document.getElementById('updateLayer');
+    if (!layer) return;
+
+    layer.addEventListener('click', function (event) {
+      const target = event.target.closest('[data-upd]');
+      if (!target) return;
+
+      if (target.dataset.upd === 'now') {
+        if (updBusy) return;
+        paintUpdateProgress(0);
+        if (window.DshNative && window.DshNative.postMessage) {
+          window.DshNative.postMessage('updateDownload');
+        } else {
+          closeUpdateLayer();
+          showToast('网页预览里不下载安装包');
+        }
+        return;
+      }
+
+      /* 下载中不许关，避免进度丢了用户以为没在下载 */
+      if (updBusy) return;
+      closeUpdateLayer();
+    });
+  }
+
   function bindEvents() {
+    bindAskLayer();
+    bindUpdateLayer();
+
     /* App 里：等原生桥挂好，按存档里的开关状态把服务拉起来 */
     let bgTries = 0;
     (function bootBackgroundPoll() {
@@ -2267,23 +2646,25 @@
     if (statusLine) {
       statusLine.addEventListener('click', function () {
         if (activeSession().type !== 'peer') return;
-        const current = peerAddress();
-        const answer = window.prompt(
-          '电脑地址（留空表示断开）',
-          current || '192.168.1.5:8080'
-        );
-        if (answer === null) return;
-        setPeerAddress(answer);
-        peerStop();
-        if (answer) {
-          peer.since = 0;
-          peerStart();
-          showToast('正在连接 ' + answer);
-        } else {
-          peer.online = false;
-          paintPeerStatus();
-          showToast('已断开');
-        }
+        askText({
+          title: '电脑地址',
+          hint: '留空表示断开连接',
+          value: peerAddress() || '192.168.1.5:8080',
+          onDone: function (answer) {
+            if (answer === null) return;
+            setPeerAddress(answer);
+            peerStop();
+            if (answer) {
+              peer.since = 0;
+              peerStart();
+              showToast('正在连接 ' + answer);
+            } else {
+              peer.online = false;
+              paintPeerStatus();
+              showToast('已断开');
+            }
+          },
+        });
       });
     }
 
@@ -2652,6 +3033,7 @@
         navigator.serviceWorker.register('sw.js').catch(function () {});
       });
     }
+    paintVersion();
     startSlotTimer();
     warmImages();
     if (peerAddress()) peerStart();

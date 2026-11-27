@@ -61,6 +61,13 @@ class _WebShellState extends State<WebShell> {
   final AppUpdater _updater = AppUpdater(repository: kRepo);
   bool _checking = false;
 
+  /// 上一次告诉网页的键盘高度，相同就不重复发
+  double? _lastKb;
+
+  /// 网页弹窗里点「立即更新」时要下载的那个版本
+  UpdateInfo? _pendingUpdate;
+
+
   @override
   void initState() {
     super.initState();
@@ -99,6 +106,10 @@ class _WebShellState extends State<WebShell> {
               break;
             case 'checkUpdate':
               _checkUpdate(manual: true);
+              break;
+            // 网页里点了「立即更新」：原生只负责下载 + 拉起安装器
+            case 'updateDownload':
+              _startUpdateDownload();
               break;
             // 网页说"进全屏"：这里就是铺满整屏（状态栏透明覆盖），不隐藏系统栏，
             // 这样顶部既有背景色、时间电量也还在
@@ -204,6 +215,20 @@ class _WebShellState extends State<WebShell> {
     await _web.runJavaScript('window.DshMicAnswer && window.DshMicAnswer($ok)');
   }
 
+  /// 键盘高度：直接用系统的 IME insets（每帧变就每帧发），
+  /// 网页拿它平移输入栏——这条时间线跟键盘动画同步，不用等 WebView 自己 resize 完。
+  Future<void> _pushKeyboard(double bottom) async {
+    final px = bottom.round().clamp(0, 400).toDouble();
+    if (_lastKb == px) return;
+    _lastKb = px;
+
+    try {
+      await _web.runJavaScript('window.DshKeyboard && window.DshKeyboard(${px.toInt()})');
+    } catch (_) {
+      /* 页面还没加载好 */
+    }
+  }
+
   /// 状态栏高度：WebView 里 env(safe-area-inset-top) 一般是 0，
   /// 所以由原生把真实高度写成 CSS 变量，网页用它做顶部内边距
   double? _lastTopInset;
@@ -243,6 +268,18 @@ class _WebShellState extends State<WebShell> {
 
   // ---------------- 检查更新 ----------------
 
+  /// 给网页发一条更新事件；网页没加载好/没有这个函数就静默跳过
+  Future<void> _upd(String js) async {
+    try {
+      await _web.runJavaScript('window.DshUpdate && $js');
+    } catch (_) {
+      /* 页面还没好，忽略 */
+    }
+  }
+
+  String _q(String? s) => jsonEncode(s ?? '');
+
+  /// 查版本。界面全部交给网页（原生 AlertDialog 太丑，而且跟那套浅蓝不搭）
   Future<void> _checkUpdate({required bool manual}) async {
     if (_checking) return;
     _checking = true;
@@ -253,162 +290,63 @@ class _WebShellState extends State<WebShell> {
       _checking = false;
       return;
     }
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
 
-    if (manual) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('正在检查更新…'),
-          duration: Duration(seconds: 1),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
+    if (manual) await _upd("DshUpdate('checking')");
 
     try {
       final update = await _updater.check(current);
 
       if (update == null) {
         if (manual) {
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text('已是最新版本 $current'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          await _upd("DshUpdate('latest', {version: ${_q(current)}})");
         }
         return;
       }
 
-      if (!mounted) return;
-      final go = await _showUpdateDialog(update, current);
-      if (go == true && mounted) {
-        await _downloadAndInstall(update);
-      }
+      _pendingUpdate = update;
+      await _upd(
+        "DshUpdate('available', {"
+        "version: ${_q(update.version)}, "
+        "current: ${_q(current)}, "
+        "size: ${_q(update.sizeText)}, "
+        "notes: ${_q(update.notes)}})",
+      );
     } on UpdateException catch (e) {
-      if (manual && mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('检查更新失败：${e.message}'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+      if (manual) {
+        await _upd("DshUpdate('error', {message: ${_q('检查更新失败：${e.message}')}})");
       }
     } catch (_) {
-      if (manual && mounted) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('检查更新失败，请检查网络'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+      if (manual) {
+        await _upd("DshUpdate('error', {message: ${_q('检查更新失败，请检查网络')}})");
       }
     } finally {
       _checking = false;
     }
   }
 
-  Future<bool?> _showUpdateDialog(UpdateInfo info, String current) {
-    return showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext ctx) {
-        final hasNotes = info.notes.isNotEmpty;
-        return AlertDialog(
-          title: Text('发现新版本 ${info.version}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '当前 $current'
-                '${info.sizeText.isEmpty ? '' : ' · 安装包 ${info.sizeText}'}',
-                style: const TextStyle(fontSize: 12.5, color: Color(0xFF6B7E9B)),
-              ),
-              if (hasNotes) ...[
-                const SizedBox(height: 12),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 220),
-                  child: SingleChildScrollView(
-                    child: Text(info.notes, style: const TextStyle(fontSize: 13)),
-                  ),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('稍后'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('立即更新'),
-            ),
-          ],
-        );
-      },
-    );
-  }
+  /// 网页点了「立即更新」：下载、回报进度、拉起系统安装器
+  Future<void> _startUpdateDownload() async {
+    final update = _pendingUpdate;
+    if (update == null) return;
+    _pendingUpdate = null;
 
-  Future<void> _downloadAndInstall(UpdateInfo info) async {
-    final progress = ValueNotifier<double>(0);
-    var dialogClosed = false;
-
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext ctx) {
-        return AlertDialog(
-          title: const Text('正在下载更新'),
-          content: ValueListenableBuilder<double>(
-            valueListenable: progress,
-            builder: (_, double value, __) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  LinearProgressIndicator(value: value == 0 ? null : value),
-                  const SizedBox(height: 10),
-                  Text(
-                    value == 0 ? '准备中…' : '${(value * 100).toStringAsFixed(0)}%',
-                    style: const TextStyle(fontSize: 12.5),
-                  ),
-                ],
-              );
-            },
-          ),
-        );
-      },
-    );
-
+    var lastPct = -1;
     try {
       final path = await _updater.downloadApk(
-        info,
-        onProgress: (double p) => progress.value = p,
+        update,
+        onProgress: (double p) {
+          // 进度回调很密，只在百分比变了才发，别把桥挤爆
+          final pct = (p * 100).round();
+          if (pct == lastPct) return;
+          lastPct = pct;
+          _upd("DshUpdate('progress', {percent: ${p.toStringAsFixed(3)}})");
+        },
       );
 
-      // 先关掉进度框，再拉起系统安装界面
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-        dialogClosed = true;
-      }
+      await _upd("DshUpdate('done')");
       await _updater.installApk(path);
     } catch (e) {
-      if (!dialogClosed && mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('更新失败：$e'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } finally {
-      progress.dispose();
+      await _upd("DshUpdate('fail', {message: ${_q('更新失败：$e')}})");
     }
   }
 
@@ -422,12 +360,21 @@ class _WebShellState extends State<WebShell> {
       },
       child: Builder(
         builder: (BuildContext ctx) {
+          final media = MediaQuery.of(ctx);
+
           // 不用 SafeArea：让 WebView 顶到屏幕最上面，顶部空白由网页自己的 padding 处理
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _pushSafeTop(MediaQuery.of(ctx).viewPadding.top);
+            if (!mounted) return;
+            _pushSafeTop(media.viewPadding.top);
+            _pushKeyboard(media.viewInsets.bottom);
           });
+
           return Scaffold(
             backgroundColor: const Color(0xFFE8F1FD),
+            // 键盘弹出时不要让 Scaffold 缩body：WebView 一被 resize 就要整页重排，
+            // 那正是"掉帧"的来源。窗口（adjustNothing）和 body 尺寸都保持不变，
+            // 键盘高度只用来平移网页里的输入栏。
+            resizeToAvoidBottomInset: false,
             body: WebViewWidget(controller: _web),
           );
         },

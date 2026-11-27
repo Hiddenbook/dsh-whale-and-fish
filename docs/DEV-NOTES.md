@@ -200,7 +200,10 @@ dsh-app/
 - 头像是「我的」页那张资料图（`assets/avatar-user.jpg`），用 `.avatar-user` 放大裁到脸，
   和 `photo` 用的是两套取景参数，互不影响
 - 消息走 `tools/serve.py` 的 `/send` + `/messages`（无第三方依赖），轮询间隔 1s
-- 首次进会话要填电脑地址（如 `192.168.1.5:8080`），存 `localStorage` 的 `dsh.peer.base`
+- 首次进会话要填电脑地址（如 `10.184.48.28:8080`），存 `localStorage` 的 `dsh.peer.base`；
+  改地址点聊天头部那行状态
+- 输入框是**自绘弹层**（`.ask`），不是 `window.prompt` —— 系统对话框在 WebView 里弹出有过渡动画、
+  滚动时掉帧且样式改不了；自绘的没有 transition，`display` 一变就到最终位置
 - 对端消息不显示 Token，也不会触发模拟回复
 
 ## 后台接收（App 退到后台也能弹通知）
@@ -217,15 +220,34 @@ dsh-app/
 
 **做不到**：App 被彻底杀掉 / 从没启动过也能收 —— 那需要服务器 + 厂商通道或极光个推。
 
-## 软键盘（这一版重点修的）
+## 软键盘（踩了两轮坑）
 
-之前打完字收起键盘，底部会露出一截深蓝 + 浅蓝的色带、看着像卡住。原因和修法：
+**问题一：收起键盘时底部露出一截色带**
+`visualViewport` 是逐帧变回来的，原来每帧都改写 `.phone` 的行内 `height`，中间几帧外壳
+比视口矮，底下就露出 body 和渐变的边。改成键盘收起时立刻把高度交还 CSS，并用
+`requestAnimationFrame` 合并 resize。
 
-- `visualViewport` 的高度是**逐帧**变回来的，原来每次 resize 都把 `.phone` 的行内
-  `height` 改一次，于是中间几帧外壳比视口矮，底下就露出 body 和渐变的边
-- 现在分两种情况：**键盘在**（`innerHeight - visualViewport.height > 80`）才写行内高度；
-  **键盘收起**立刻把行内 `height` 清空、交还给 CSS 的 `100dvh`，不再逐帧回弹
-- 所有 resize 用 `requestAnimationFrame` 合并，避免一帧内多次改布局
+**问题二：键盘弹起时输入栏上移卡顿（这一版重点修的）**
+根因是 Android WebView 在 `adjustResize` 下会**真正缩小布局视口**，`.phone` 用的是
+`100dvh`，于是键盘动画的几十帧里每一帧都在触发整页重排（消息列表、输入栏一起动）。
+资料里对这件事的说法很一致：Android 改的是 Layout Viewport，`100vh/100dvh` 会跟着塌，
+底部元素看起来像"瞬移"。
+
+现在的做法（App 内，v0.1.5 定稿）：
+
+- 窗口层面把 Android 的 `windowSoftInputMode` 改成 **`adjustNothing`**：键盘弹出时系统
+  **既不缩窗口也不挪窗口**，WebView 的 surface 尺寸全程不变 → 没有重排、没有重栅格，
+  卡顿和"收起时那两条色带"都从根上消失了
+- Flutter 的 `Scaffold` 必须同时 `resizeToAvoidBottomInset: false`，否则它自己还会把 body 缩一遍
+- 键盘高度取**系统 IME insets 的逐帧动画值**（`MediaQuery.viewInsets.bottom`；
+  `adjustNothing` 下照样逐帧上报，实测一次弹出能拿到 13 个连续高度 15→324dp），
+  每帧通过 `window.DshKeyboard(px)` 推给网页
+- 网页只做一件事：`transform: translateY(-var(--kb))` 平移输入栏（走合成层，不触发重排），
+  `--kb` 每帧更新；列表底部留白用另一个变量 `--kb-pad`，等键盘停稳 130ms 后再改，
+  避免逐帧改 padding
+- 阈值：原生上报时 `kb > 0` 就算键盘在（别卡 80px，否则动画头尾各丢一截，手感就是"慢半拍"）
+
+浏览器里仍然用原来那套（iOS 只缩视觉视口，`.phone` 要跟着缩）。
 
 
 ## 假数据在哪（`app.js` 顶部）
@@ -306,6 +328,18 @@ dsh-app/
 
 ---
 
+## 版本号（「我的」页底部那行）
+
+`0.1.4(3)` = 版本 `0.1.4` + **上次发布之后第 3 次改动**；正式发版只显示 `0.1.4`。
+
+不用手改：`app.js` 顶部那两行由 `flutter-shell/stamp-version.py` 自动改写，
+`同步网页.bat` 每次同步前都会跑一遍。
+
+- 版本号取自 `pubspec.yaml` 的 `version:`，发 0.1.5 时只改那一行
+- 括号里的数字存在 `flutter-shell/.build-count`，每跑一次 +1
+- 发正式包：`python stamp-version.py --release` —— 不显示括号，**并把计数清零**，
+  所以下一个测试包又从 `(1)` 开始
+
 ## 手机上看效果
 
 不要拷 html 到手机上打开（iOS 的 `file://` 会限制 `localStorage`，改的名字/头像存不住）。用局域网访问：
@@ -382,3 +416,17 @@ dsh-app/
 - 时段判定按**固定 UTC+8（北京时间）**，不用设备时区 —— 用 `new Date(ms + 8h)` 后只取 `getUTC*`，
   所以手机/电脑时区设错也算得对；唯一影响是**系统时间本身被改错**，那样倒计时会跟着错（要防这个就得让后端下发时间）
 - **打成 APK / 装成 PWA 的完整步骤见 `打包成App.md`**
+
+---
+
+## 0.1.5 改了这些（2026-11-27）
+
+1. **键盘跟手**：见上面「软键盘（踩了两轮坑）」，最终方案是 `adjustNothing` + 原生逐帧下发 IME 高度。
+2. **通知不再重复**：开了「后台推送」时，网页在后台不再自己弹通知（原来它和原生前台服务
+   会各弹一条，通知栏里出现两条一样的消息）；全交给 `PeerService`。
+   另外原生 `notify` 的 id 从「当前时间戳」改成「标题哈希」，同一来源只会覆盖，不会堆成一排。
+3. **未读改成头像右上角红圆 + 数字**（微信那种）：`session.unreadCount` 记条数，
+   老存档只有布尔值时按 1 条迁移；99 以上显示 `99+`；进会话 / 清除记录 / 标为未读都会同步。
+4. **检查更新换成自己的弹窗**：原生 `AlertDialog` 灰底直角，跟这套浅蓝完全不搭，所以
+   查版本、下载进度、失败提示全部搬进网页（`#updateLayer`），原生只保留三件事：
+   查 GitHub Releases、下载 APK、拉起系统安装器。进度回调按百分比去重，避免刷爆桥。

@@ -963,16 +963,33 @@ button {
   height: 11px;
 }
 
-/* 会话行：未读红点 / 置顶标记 */
-.session-unread {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  margin-left: 4px;
-  border-radius: 50%;
-  background: #E5484D;
+/* 未读数：头像右上角的红色圆 + 数字（微信那种） */
+.avatar-unread {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  z-index: 3;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border: 1.5px solid #FFFFFF;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #FF5A61 0%, #E5343C 100%);
+  color: #FFFFFF;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+  box-shadow: 0 2px 6px rgba(214, 45, 53, 0.35);
+  pointer-events: none;
 }
 
+/* 会话行：置顶标记 */
 .session-pin {
   flex: none;
   padding: 1px 6px;
@@ -983,6 +1000,219 @@ button {
   color: #3C6FB5;
 }
 
+
+/* ===========================================================
+   输入弹层（替代 window.prompt）
+   系统 prompt 在 WebView 里有弹出动画，滚动时会掉帧，而且样式改不了。
+   这里不用 transition / animation：display 一变就直接到位，等于两帧。
+   =========================================================== */
+.ask {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 22vh var(--pad) 0;
+}
+
+.ask[hidden] {
+  display: none;
+}
+
+.ask-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(12, 28, 54, 0.42);
+}
+
+.ask-card {
+  position: relative;
+  width: 100%;
+  max-width: 320px;
+  padding: 18px 16px 14px;
+  border-radius: 18px;
+  background: #FFFFFF;
+  box-shadow: 0 18px 44px rgba(14, 38, 76, 0.3);
+}
+
+.ask-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.ask-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.ask-hint[hidden] {
+  display: none;
+}
+
+.ask-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  background: #F7FAFF;
+  font-size: 15px;
+  color: var(--ink);
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.ask-input:focus {
+  border-color: rgba(76, 134, 219, 0.55);
+  background: #FFFFFF;
+}
+
+.ask-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ask-btn {
+  flex: 1;
+  padding: 11px 0;
+  border: 0;
+  border-radius: 12px;
+  background: #EDF2FA;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: #3A5C8C;
+  cursor: pointer;
+}
+
+.ask-btn.ask-primary {
+  background: linear-gradient(180deg, #5B92E8 0%, #3F76D8 100%);
+  color: #FFFFFF;
+}
+
+.ask-btn:active {
+  transform: scale(0.97);
+}
+
+/* ---------------- 检查更新 ----------------
+   原生 AlertDialog 是灰底直角那种系统样式，跟这套浅蓝玻璃完全不搭，
+   所以弹窗搬到网页里画，原生只负责下载和拉起安装器。 */
+.upd {
+  align-items: center;
+  padding: 0 var(--pad);
+}
+
+.upd-card {
+  max-width: 330px;
+  padding: 18px 18px 14px;
+}
+
+.upd-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.upd-badge {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-top: 1px;
+  border-radius: 12px;
+  background: linear-gradient(160deg, #E8F2FF 0%, #CFE3FF 100%);
+  box-shadow: inset 0 1px 0 #FFFFFF;
+}
+
+.upd-badge svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: #3F76D8;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.upd-headtext {
+  min-width: 0;
+}
+
+.upd-headtext .ask-title {
+  margin: 0 0 3px;
+  font-size: 15.5px;
+  letter-spacing: 0.2px;
+}
+
+.upd-sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #7A8DA8;
+}
+
+.upd-notes {
+  max-height: 168px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #F4F8FF;
+  border: 1px solid rgba(210, 226, 245, 0.9);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: #4A5E7C;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.upd-notes:empty {
+  display: none;
+}
+
+.upd-progress {
+  margin-top: 14px;
+}
+
+.upd-progress[hidden] {
+  display: none;
+}
+
+.upd-bar {
+  height: 7px;
+  border-radius: 999px;
+  background: #E4EDF9;
+  overflow: hidden;
+}
+
+.upd-bar i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6BA0EE 0%, #3F76D8 100%);
+  transition: width 0.18s ease;
+}
+
+.upd-percent {
+  margin: 7px 0 0;
+  font-size: 12px;
+  color: #6B7E9B;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.upd-actions[hidden] {
+  display: none;
+}
 
 /* 只在浏览器里显示的项（App 里没有浏览器工具栏，这类开关不用出现） */
 html[data-env="app"] .browser-only {
@@ -1776,6 +2006,44 @@ html.low-fx .pop-menu {
 .page-chat.is-voice .composer,
 .page-chat.is-plus .composer {
   transform: translateY(calc(-1 * var(--panel-h, 173px)));
+}
+
+/* App 里整屏都被网页占据，body 不用那块深蓝"背景板"，
+   否则键盘收起、外壳和视口错开的那一瞬间会露出一条深蓝色带 */
+html[data-env="app"] body {
+  background: #E8F1FD;
+}
+
+/* App 里外壳高度锁死（--vh-lock 由 JS 启动时写入）：
+   WebView 因键盘缩小时，页面布局完全不动，只有底部被键盘盖住，
+   输入栏靠下面的 transform 抬上去。这样键盘弹出期间零重排。 */
+html[data-env="app"] .phone {
+  height: var(--vh-lock, 100vh);
+}
+
+/* 键盘收起后（kb-off）：外壳回到 100dvh 跟随视口。
+   锁死高度只用于"键盘弹起中"那一小段，收起来就必须交还，否则底部会露出
+   .phone 之外的区域，看着就是两条色带。 */
+html[data-env="app"].kb-off .phone,
+html[data-env="app"] .phone.kb-off {
+  height: 100dvh;
+}
+
+/* 键盘态：把输入栏平移到键盘上方。transform 走合成层，不触发整页重排；
+   transition 关掉，直接到位，不留中间帧。 */
+.phone.is-keyboard .composer {
+  transform: translateY(calc(-1 * var(--kb, 0px)));
+  transition: none;
+}
+
+/* 列表底部留白用 --kb-pad（稳定后才更新），避免每帧改 padding 触发重排 */
+.phone.is-keyboard .chat-scroll {
+  padding-bottom: calc(var(--kb-pad, 0px) + 8px);
+}
+
+/* 键盘收起的那一下也别做过渡动画 */
+.phone.kb-resetting .composer {
+  transition: none;
 }
 
 .page-chat.is-voice .chat-scroll,
