@@ -147,7 +147,7 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.6 19.4h3.2L18 9.2l-3.2-3.2L4.6 16.2z"/><path d="M14.4 6.4l3.2 3.2"/></svg>
               </button>
             </div>
-            <div class="hero-online" title="DeepSeek 峰谷：高峰（×2）工作日 09:00–12:00、14:00–18:00；其余时间、周末与法定节假日都是谷价"><span class="online-dot"></span>在线<span class="status-div">|</span><span class="status-slot" id="slotHome">峰期 --:--:--</span></div>
+            <div class="hero-online" title="DeepSeek 峰谷：高峰（×2）工作日 09:00–12:00、14:00–18:00；其余时间、周末与法定节假日都是谷价"><span class="online-dot"></span><span id="homeOnlineText">在线</span><span class="status-div">|</span><span class="status-slot" id="slotHome">峰期 --:--:--</span></div>
             <div class="hero-sign">个性签名：<span id="profileSign">今天也想见你一面</span></div>
           </div>
           <svg class="hero-mark" viewBox="0 0 110 74" aria-hidden="true">
@@ -238,7 +238,7 @@
             <button class="glass-btn" type="button" id="searchToggle" aria-label="搜索" aria-expanded="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.4"/><path d="M15.8 15.8 20 20"/></svg>
             </button>
-            <button class="glass-btn" type="button" aria-label="新建群" data-toast="建群 · 暂未开发">
+            <button class="glass-btn" type="button" id="newChatBtn" aria-label="新建" aria-expanded="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg>
             </button>
           </div>
@@ -365,7 +365,7 @@
             <div class="hero-title">
               <h2 id="momentsName">小鱼</h2>
             </div>
-            <div class="hero-online"><span class="online-dot"></span>在线</div>
+            <div class="hero-online" id="momentsOnline"><span class="online-dot"></span><span id="momentsOnlineText">在线</span></div>
             <div class="hero-sign">个性签名：<span id="momentsSign">今天也想见你一面</span></div>
           </div>
           <svg class="hero-mark" viewBox="0 0 110 74" aria-hidden="true">
@@ -431,7 +431,7 @@
         </div>
 
         <div class="group">
-          <button class="row" type="button" data-toast="服务连接正常">
+          <button class="row" type="button" id="serviceLinkRow">
             <span class="row-ico">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.4 7.2h9.2M9.4 12h9.2M9.4 16.8h9.2"/><circle cx="5.2" cy="7.2" r="1.4"/><circle cx="5.2" cy="12" r="1.4"/><circle cx="5.2" cy="16.8" r="1.4"/></svg>
             </span>
@@ -580,6 +580,89 @@
       </div>
     </section>
 
+
+    <!-- ============ 7. 服务连接（管道） ============ -->
+    <section class="page" id="page-link" data-page="link" aria-label="服务连接">
+      <div class="scroller scroller-settings">
+
+        <header class="page-bar">
+          <button class="glass-btn back js-back" type="button" aria-label="返回">‹</button>
+          <div class="title-pill">
+            <span class="pill-orn"></span>
+            <span>服务连接</span>
+            <span class="pill-orn"></span>
+          </div>
+        </header>
+
+        <p class="conn-note">聊天要经过电脑上的「管道」服务。地址和令牌在 DSH 那个插件的「绑定」页里也能看到，两边填一样的。</p>
+
+        <div class="conn-field">
+          <label class="conn-label" for="pipeBase">管道地址</label>
+          <div class="conn-scan-row">
+            <input class="conn-input" id="pipeBase" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://xxx.trycloudflare.com">
+            <button class="conn-scan-btn" type="button" id="pipeScan" aria-label="扫一扫">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 9V6.2A2.2 2.2 0 0 1 6.2 4H9M15 4h2.8A2.2 2.2 0 0 1 20 6.2V9M20 15v2.8A2.2 2.2 0 0 1 17.8 20H15M9 20H6.2A2.2 2.2 0 0 1 4 17.8V15"/>
+                <path d="M4 12h16"/>
+              </svg>
+            </button>
+          </div>
+          <p class="conn-hint-inline">电脑上插件「绑定」页可以显示二维码，扫一下自动填这两项。</p>
+        </div>
+
+        <div class="conn-field">
+          <label class="conn-label" for="pipeToken">令牌</label>
+          <input class="conn-input" id="pipeToken" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="pipe.config.json 里的 token">
+        </div>
+
+        <p class="conn-state" id="pipeState">还没连接</p>
+
+        <div class="conn-actions">
+          <button class="btn btn-primary" type="button" id="pipeSave">保存并连接</button>
+          <button class="btn" type="button" id="pipeTest">测试连接</button>
+        </div>
+
+        <p class="conn-hint">现在这一步只把地址存下来、试着连一次；管道接进来之后，消息才真的走这条路。</p>
+      </div>
+    </section>
+
+
+    <!-- ============ 8. 创建聊天 ============ -->
+    <section class="page" id="page-newchat" data-page="newchat" aria-label="创建聊天">
+      <div class="scroller scroller-settings">
+
+        <header class="page-bar">
+          <button class="glass-btn back js-back" type="button" aria-label="返回">‹</button>
+          <div class="title-pill">
+            <span class="pill-orn"></span>
+            <span>创建聊天</span>
+            <span class="pill-orn"></span>
+          </div>
+        </header>
+
+        <div class="newchat-head">
+          <button class="newchat-avatar" type="button" id="newChatAvatar" aria-label="上传头像">
+            <span class="newchat-avatar-plus" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
+            </span>
+          </button>
+          <span class="newchat-avatar-hint" id="newChatAvatarHint">点一下上传头像</span>
+        </div>
+
+        <div class="conn-field">
+          <label class="conn-label" for="newChatName">名字</label>
+          <input class="conn-input" id="newChatName" type="text" maxlength="16" autocomplete="off" placeholder="给这个聊天起个名字">
+        </div>
+
+        <div class="conn-actions">
+          <button class="btn btn-primary" type="button" id="newChatCreate">创建</button>
+          <button class="btn" type="button" id="newChatCancel">取消</button>
+        </div>
+
+        <input type="file" id="newChatFile" accept="image/*" hidden>
+      </div>
+    </section>
+
   </main>
 
   <!-- 底部 tab 栏 -->
@@ -653,6 +736,24 @@
 
 </div>
 
+
+  <!-- 扫一扫：扫电脑上那个二维码，自动填地址和令牌 -->
+  <div class="scan" id="scanLayer" hidden role="dialog" aria-modal="true" aria-label="扫一扫">
+    <div class="scan-top">
+      <button class="scan-close" type="button" id="scanCancel" aria-label="关闭">✕</button>
+      <span class="scan-title">扫电脑上的二维码</span>
+    </div>
+    <div class="scan-view">
+      <video class="scan-video" id="scanVideo" playsinline muted></video>
+      <div class="scan-frame" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
+      </div>
+    </div>
+    <p class="scan-tip" id="scanTip">在电脑上打开 DSH → 设置 → 鲸与鱼 → 绑定 → 显示二维码</p>
+    <canvas id="scanCanvas" hidden></canvas>
+  </div>
+
+<script src="assets/vendor/jsQR.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

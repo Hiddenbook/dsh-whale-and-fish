@@ -303,6 +303,16 @@ button {
   box-shadow: 0 0 0 2.5px rgba(56, 201, 118, 0.26);
 }
 
+/* 连不上管道时：小圆点变灰、字也淡下去 */
+.hero-online.is-off {
+  color: var(--ink-3);
+}
+
+.hero-online.is-off .online-dot {
+  background: #C3CEDD;
+  box-shadow: 0 0 0 2.5px rgba(195, 206, 221, 0.32);
+}
+
 /* 「我的电脑 / 我的手机」头像：和「我的」页同一个素材。
    不放大裁剪，整幅图缩进圆里，头不会显得过大 */
 .avatar-user {
@@ -3076,4 +3086,313 @@ html[data-env="app"] .phone.kb-off {
 
 .chat-avatar.avatar-emoji {
   font-size: 24px;
+}
+
+/* ===========================================================
+   服务连接（管道地址 / 令牌）
+   =========================================================== */
+.conn-note {
+  margin: 0 4px 14px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-3);
+}
+
+.conn-field {
+  margin-bottom: 12px;
+}
+
+.conn-label {
+  display: block;
+  margin: 0 4px 6px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.conn-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 12px;
+  border: 1px solid rgba(210, 226, 245, 0.95);
+  border-radius: 12px;
+  background: #FFFFFF;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.conn-input::placeholder {
+  color: #A9B7CB;
+}
+
+.conn-input:focus {
+  outline: none;
+  border-color: #8FB6EA;
+  box-shadow: 0 0 0 3px rgba(76, 134, 219, 0.12);
+}
+
+.conn-state {
+  margin: 2px 4px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
+  word-break: break-word;
+}
+
+.conn-state.is-ok {
+  color: #1D9E75;
+}
+
+.conn-state.is-bad {
+  color: #D4537E;
+}
+
+.conn-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.conn-actions .btn {
+  flex: 1;
+}
+
+.conn-hint {
+  margin: 12px 4px 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* 自己上传的会话头像：直接铺图 */
+.avatar-custom {
+  background-color: #EAF1FB;
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: 50% 50%;
+  border-radius: 50%;
+}
+
+/* 服务连接页的下拉 */
+.conn-select {
+  height: 44px;
+  padding: 0 10px;
+  appearance: auto;
+}
+
+/* ===========================================================
+   创建聊天
+   =========================================================== */
+.newchat-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 18px;
+}
+
+.newchat-avatar {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  padding: 0;
+  border: 1.5px dashed rgba(143, 182, 234, 0.9);
+  border-radius: 50%;
+  background-color: #F4F8FF;
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: 50% 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.newchat-avatar.has-image {
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 14px rgba(46, 84, 145, 0.18);
+}
+
+.newchat-avatar-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(76, 134, 219, 0.12);
+}
+
+.newchat-avatar.has-image .newchat-avatar-plus {
+  display: none;
+}
+
+.newchat-avatar-plus svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: #4C86DB;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.newchat-avatar-hint {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+/* 管道地址 + 扫一扫 */
+.conn-scan-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.conn-scan-btn {
+  flex: none;
+  width: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(210, 226, 245, 0.95);
+  border-radius: 12px;
+  background: #FFFFFF;
+  cursor: pointer;
+}
+
+.conn-scan-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: #4C86DB;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.conn-scan-btn:active {
+  transform: scale(0.96);
+}
+
+.conn-hint-inline {
+  margin: 6px 4px 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+/* ===========================================================
+   扫一扫浮层
+   =========================================================== */
+.scan {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  background: #0B1524;
+  color: #FFFFFF;
+}
+
+.scan[hidden] {
+  display: none;
+}
+
+.scan-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.scan-close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #FFFFFF;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.scan-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.scan-view {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scan-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000000;
+}
+
+.scan-frame {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 216px;
+  height: 216px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.scan-frame span {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 2.5px solid #FFFFFF;
+  border-radius: 3px;
+}
+
+.scan-frame span:nth-child(1) {
+  left: 0;
+  top: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.scan-frame span:nth-child(2) {
+  right: 0;
+  top: 0;
+  border-left: 0;
+  border-bottom: 0;
+}
+
+.scan-frame span:nth-child(3) {
+  left: 0;
+  bottom: 0;
+  border-right: 0;
+  border-top: 0;
+}
+
+.scan-frame span:nth-child(4) {
+  right: 0;
+  bottom: 0;
+  border-left: 0;
+  border-top: 0;
+}
+
+.scan-tip {
+  flex: none;
+  margin: 0;
+  padding: 16px 24px 28px;
+  font-size: 12px;
+  line-height: 1.7;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.72);
 }

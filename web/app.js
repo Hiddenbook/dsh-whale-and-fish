@@ -8,7 +8,7 @@
 
   /* 版本号：这两行由 stamp-version.py 按 pubspec.yaml 自动改写，别手改。
      TEST_BUILD = 上次发布之后第几次改动；0 表示正式版，不显示括号。 */
-  const APP_VERSION = '0.1.5';
+  const APP_VERSION = '0.1.6';
   const TEST_BUILD = 0;
 
   /* ==========================================================
@@ -65,8 +65,6 @@
   /** 朋友圈动态（清空状态，接手后端后往这里填） */
   const MOMENTS = [];
 
-  /** 测试用固定回复：不管发什么，对方都回这一段（接后端后删掉 scheduleReply 即可） */
-  const AUTO_REPLY = '我在呢，你说的话我都听着。先不用急着解释，慢慢来就好，我哪儿也不去。';
 
   /** 计价（元 / 百万 token）：约 ¥0.9 / 千 token，让单条回复落在 0.0x 元；
    *  接后端后换成真实 usage × 真实价目即可，只影响这里 */
@@ -407,10 +405,14 @@
     me: 'me',
     settings: null,
     editprofile: null,
+    link: null,
+    newchat: null,
   };
 
   const state = {
     tab: 'home',
+    /* 管道连接状态：unset 没配 / checking 正在查 / online 通了 / offline 连不上 */
+    pipeStatus: 'unset',
     bgDelivery: true,
     costMode: false, /* false = 显示 token（默认）；true = 显示 ¥ */
     sessionFilter: 'all',
@@ -457,8 +459,24 @@
     /* 聊天记录：按 id 对回会话，消息多就整段恢复 */
     if (Array.isArray(saved.chats)) {
       saved.chats.forEach(function (savedChat) {
-        const session = SESSIONS.find(function (item) { return item.id === savedChat.id; });
-        if (!session) return;
+        let session = SESSIONS.find(function (item) { return item.id === savedChat.id; });
+        if (!session) {
+          /* 自己「创建聊天」建的会话不在种子里，得照存档还原一条 */
+          if (!savedChat.custom) return;
+          session = {
+            id: savedChat.id,
+            name: savedChat.name || '新聊天',
+            type: savedChat.type === 'group' ? 'group' : 'friend',
+            avatar: savedChat.avatar || '新',
+            custom: true,
+            pinned: false,
+            starred: false,
+            unread: false,
+            unreadCount: 0,
+            messages: [],
+          };
+          SESSIONS.push(session);
+        }
         if (typeof savedChat.pinned === 'boolean') session.pinned = savedChat.pinned;
         if (typeof savedChat.starred === 'boolean') session.starred = savedChat.starred;
         if (typeof savedChat.unread === 'boolean') session.unread = savedChat.unread;
@@ -495,6 +513,9 @@
         starred: !!session.starred,
         unread: !!session.unread,
         unreadCount: session.unreadCount || 0,
+        ...(session.custom
+          ? { custom: true, name: session.name, type: session.type, avatar: session.avatar }
+          : {}),
         messages: session.messages.map(function (msg) {
           const out = { from: msg.from, time: msg.time, state: msg.state || 'ok' };
           if (msg.kind) out.kind = msg.kind;
@@ -688,6 +709,17 @@
 
   function paintSessionAvatar(node, session) {
     if (!node) return;
+
+    /* 自己上传的头像：直接铺图，别的规则都不走 */
+    if (typeof session.avatar === 'string' && session.avatar.indexOf('data:') === 0) {
+      node.classList.remove('avatar-photo', 'avatar-user', 'avatar-emoji');
+      node.classList.add('avatar-custom');
+      node.style.backgroundImage = 'url("' + session.avatar + '")';
+      node.textContent = '';
+      return;
+    }
+    node.style.backgroundImage = '';
+
     if (session.avatar === 'photo' || session.avatar === 'user') {
       node.classList.add(session.avatar === 'user' ? 'avatar-user' : 'avatar-photo');
       node.textContent = '';
@@ -1276,7 +1308,7 @@
         { key: 'star', label: session.starred ? '取消特别关注' : '设置特别关注' },
         { key: 'unread', label: '标为未读' },
         { key: 'clear', label: '清除聊天记录', danger: true },
-      ],
+      ].concat(session.custom ? [{ key: 'delete', label: '删除聊天', danger: true }] : []),
       function (key) {
         if (key === 'pin') {
           session.pinned = !session.pinned;
@@ -1301,6 +1333,10 @@
         }
         if (key === 'clear') {
           confirmClearChat(session);
+          return;
+        }
+        if (key === 'delete') {
+          confirmDeleteChat(session);
         }
       }
     );
@@ -1337,8 +1373,42 @@
     );
   }
 
+  /** 删掉自己建的聊天（自带的两个不给删），删之前再确认一次 */
+  function confirmDeleteChat(session) {
+    openPopMenu(
+      document.getElementById('sessionList').querySelector('[data-id="' + session.id + '"]') ||
+        document.getElementById('sessionList'),
+      [
+        { key: 'yes', label: '确认删除「' + session.name + '」', danger: true },
+        { key: 'no', label: '取消' },
+      ],
+      function (key) {
+        if (key !== 'yes') return;
+
+        const idx = SESSIONS.indexOf(session);
+        if (idx >= 0) SESSIONS.splice(idx, 1);
+
+        if (state.activeId === session.id) {
+          state.activeId = SESSIONS[0] ? SESSIONS[0].id : '';
+          state.selectMode = false;
+          state.selected = [];
+          go('chat');
+        }
+
+        saveState();
+        renderSessions();
+        showToast('已删除「' + session.name + '」');
+      },
+    );
+  }
+
   /* App 里按系统返回键时，先问这里：有浮层/多选/引用就先关掉，别直接退页面 */
   window.DshHandleBack = function () {
+    const scanLayer = document.getElementById('scanLayer');
+    if (scanLayer && !scanLayer.hidden) {
+      closeScan();
+      return true;
+    }
     const updLayer = document.getElementById('updateLayer');
     if (updLayer && !updLayer.hidden) {
       if (!updBusy) closeUpdateLayer();
@@ -1386,7 +1456,7 @@
     if (session.type === 'peer') {
       paintPeerStatus();
     } else {
-      setTyping(replyTimer !== null && replySession === session);
+      setTyping(waitingSession === session);
     }
 
     const avatar = document.getElementById('chatAvatar');
@@ -2043,8 +2113,9 @@
 
   /* ---- 测试用的固定回复：发什么都回同一段，延迟 0.9s 模拟对方在打字 ---- */
 
-  let replyTimer = null;
-  let replySession = null;
+  /* 「她说完了没有」：发出去之后先显示"正在输入…"，她回话就停 */
+  let waitTimer = null;
+  let waitingSession = null;
 
   let typingNow = false;
 
@@ -2052,12 +2123,175 @@
     return navigator.onLine !== false;
   }
 
+  /** 现在到底连没连上：先看有没有网，再看管道通不通 */
+  function connectionLabel() {
+    if (!isOnline()) return '离线';
+    const st = state.pipeStatus;
+    if (st === 'online') return '在线';
+    if (st === 'checking') return '连接中…';
+    return '未连接';
+  }
+
+  /** 首页 / 朋友圈那两处「在线」，跟聊天头部同一套判定 */
+  function paintConnection() {
+    const 文 = connectionLabel();
+    const off = 文 !== '在线';
+
+    ['homeOnlineText', 'momentsOnlineText'].forEach(function (id) {
+      const node = document.getElementById(id);
+      if (node) node.textContent = 文;
+    });
+    ['momentsOnline'].forEach(function (id) {
+      const box = document.getElementById(id);
+      if (box) box.classList.toggle('is-off', off);
+    });
+    const homeBox = document.getElementById('homeOnlineText');
+    if (homeBox && homeBox.parentElement) homeBox.parentElement.classList.toggle('is-off', off);
+
+    refreshChatStatus();
+  }
+
   /* 状态行：正在输入 > 离线 > 在线 */
   function refreshChatStatus() {
     const node = document.getElementById('chatStatusText');
     if (!node) return;
-    node.textContent = typingNow ? '正在输入…' : isOnline() ? '在线' : '离线';
-    node.classList.toggle('is-offline', !typingNow && !isOnline());
+    const 文 = typingNow ? '正在输入…' : connectionLabel();
+    node.textContent = 文;
+    node.classList.toggle('is-offline', !typingNow && 文 !== '在线');
+  }
+
+  /** 去管道问一句「你在不在」，顺便把各处状态刷新一遍 */
+  async function checkPipeStatus() {
+    const cfg = readPipeConfig();
+    if (!cfg.base) {
+      state.pipeStatus = 'unset';
+      paintConnection();
+      return 'unset';
+    }
+
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? window.setTimeout(function () { ctl.abort(); }, 5000) : null;
+    try {
+      const res = await fetch(cfg.base + '/info', {
+        headers: { 'X-DSH-Token': cfg.token || '' },
+        cache: 'no-store',
+        signal: ctl ? ctl.signal : undefined,
+      });
+      state.pipeStatus = res.ok ? 'online' : 'offline';
+    } catch (err) {
+      state.pipeStatus = 'offline';
+    } finally {
+      if (timer) window.clearTimeout(timer);
+    }
+    paintConnection();
+    return state.pipeStatus;
+  }
+
+  /* 每 15 秒问一次；回到前台立刻补一次 */
+  function startPipeWatch() {
+    if (pipeWatchTimer) return;
+    checkPipeStatus();
+    pipeWatchTimer = window.setInterval(checkPipeStatus, 15000);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) checkPipeStatus();
+    });
+    window.addEventListener('online', function () { checkPipeStatus(); });
+    window.addEventListener('offline', function () {
+      state.pipeStatus = 'offline';
+      paintConnection();
+    });
+  }
+  let pipeWatchTimer = null;
+
+  /* ==========================================================
+     收消息：每 2 秒去管道问一次「有没有她新说的话」
+     游标存在 localStorage，管道重启（epoch 变了）就归零重来。
+     ========================================================== */
+  const PIPE_CURSOR_KEY = 'dsh.pipe.cursor';
+  let pipePollTimer = null;
+  let pipePolling = false;
+
+  function readPipeCursor() {
+    try {
+      const raw = JSON.parse(window.localStorage.getItem(PIPE_CURSOR_KEY) || '{}');
+      return { epoch: String(raw.epoch || ''), since: Number(raw.since) || 0 };
+    } catch (err) {
+      return { epoch: '', since: 0 };
+    }
+  }
+
+  function writePipeCursor(cur) {
+    try {
+      window.localStorage.setItem(PIPE_CURSOR_KEY, JSON.stringify(cur));
+    } catch (err) {
+      /* 存不下就下次重来，最多重复一条 */
+    }
+  }
+
+  /** 管道收到的消息进哪间会话：就是「小鱼」这间 */
+  function pipeTargetSession() {
+    for (let i = 0; i < SESSIONS.length; i++) {
+      if (SESSIONS[i].id === 'xiaoyu') return SESSIONS[i];
+    }
+    return SESSIONS[0];
+  }
+
+  async function pollPipeMessages() {
+    if (pipePolling) return;
+    const cfg = readPipeConfig();
+    if (!cfg.base || !cfg.token) return;
+
+    pipePolling = true;
+    const cur = readPipeCursor();
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? window.setTimeout(function () { ctl.abort(); }, 6000) : null;
+
+    try {
+      const res = await fetch(cfg.base + '/messages?role=app&since=' + cur.since, {
+        headers: { 'X-DSH-Token': cfg.token },
+        cache: 'no-store',
+        signal: ctl ? ctl.signal : undefined,
+      });
+      if (!res.ok) return;
+
+      const data = await res.json().catch(function () { return {}; });
+      if (data.epoch && data.epoch !== cur.epoch) {
+        cur.epoch = String(data.epoch);
+        cur.since = 0;
+      }
+
+      const list = Array.isArray(data.messages) ? data.messages : [];
+      let 变了 = false;
+      for (let i = 0; i < list.length; i++) {
+        const m = list[i];
+        const seq = Number(m && m.seq) || 0;
+        if (seq <= cur.since) continue;
+        cur.since = seq;
+        变了 = true;
+        if (!m || m.from !== 'dsh') continue;
+        receiveHer(pipeTargetSession(), m.text);
+      }
+      if (变了 || data.epoch) writePipeCursor(cur);
+    } catch (err) {
+      /* 连不上就安静跳过，下一跳再试 */
+    } finally {
+      if (timer) window.clearTimeout(timer);
+      pipePolling = false;
+    }
+  }
+
+  function startPipePoll() {
+    if (pipePollTimer) return;
+    pollPipeMessages();
+    pipePollTimer = window.setInterval(pollPipeMessages, 2000);
+  }
+
+  function restartPipePoll() {
+    if (pipePollTimer) {
+      window.clearInterval(pipePollTimer);
+      pipePollTimer = null;
+    }
+    startPipePoll();
   }
 
   function setTyping(on) {
@@ -2065,23 +2299,90 @@
     refreshChatStatus();
   }
 
-  function scheduleReply(session) {
-    if (replyTimer) window.clearTimeout(replyTimer);
+  /* 发完等回复：显示"正在输入…"，最多等 120 秒 */
+  function startWaiting(session) {
+    if (waitTimer) window.clearTimeout(waitTimer);
+    waitingSession = session;
+    if (activeSession() === session) setTyping(true);
+    waitTimer = window.setTimeout(function () {
+      waitTimer = null;
+      waitingSession = null;
+      setTyping(false);
+    }, 120000);
+  }
 
-    replySession = session;
-    setTyping(true);
+  function stopWaiting() {
+    if (waitTimer) window.clearTimeout(waitTimer);
+    waitTimer = null;
+    waitingSession = null;
+    setTyping(false);
+  }
 
-    replyTimer = window.setTimeout(function () {
-      replyTimer = null;
-      session.messages.push({ from: 'her', text: AUTO_REPLY, time: nowTime() });
+  /** 把她的一句话放进会话（管道收上来的唯一入口） */
+  function receiveHer(session, text) {
+    const 文 = String(text || '').trim();
+    if (!文) return;
+
+    session.messages.push({ from: 'her', text: 文, time: nowTime(), state: 'ok' });
+    stopWaiting();
+
+    const 正在看 = activeSession() === session && document.visibilityState !== 'hidden';
+    if (正在看) {
       saveState();
+      renderChat();
+      scrollChatToBottom();
+      return;
+    }
 
-      if (activeSession() === session) {
-        setTyping(false);
-        renderChat();
-        scrollChatToBottom();
-      }
-    }, 900);
+    session.unread = true;
+    session.unreadCount = (session.unreadCount || 0) + 1;
+    saveState();
+    renderSessions();
+
+    if (document.visibilityState === 'hidden') {
+      notifyUser(session.name, 文.slice(0, 80));
+    }
+  }
+
+  /** 把一条气泡发到管道；失败就打 failed（红色感叹号，点一下重发） */
+  async function pipeSendMessage(session, msg) {
+    const cfg = readPipeConfig();
+    if (!cfg.base || !cfg.token) {
+      msg.state = 'failed';
+      saveState();
+      renderChat();
+      showToast('还没连上管道，去「服务连接」里填地址和令牌');
+      return false;
+    }
+
+    msg.state = 'sending';
+    renderChat();
+
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? window.setTimeout(function () { ctl.abort(); }, 10000) : null;
+    try {
+      const res = await fetch(cfg.base + '/say', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-DSH-Token': cfg.token },
+        body: JSON.stringify({ from: 'app', text: msg.text }),
+        signal: ctl ? ctl.signal : undefined,
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+
+      msg.state = 'ok';
+      saveState();
+      renderChat();
+      startWaiting(session);
+      return true;
+    } catch (err) {
+      msg.state = 'failed';
+      saveState();
+      renderChat();
+      showToast('没发出去：' + (err && err.name === 'AbortError' ? '超时' : String((err && err.message) || err)));
+      return false;
+    } finally {
+      if (timer) window.clearTimeout(timer);
+    }
   }
 
   /* 离线时消息照样落到列表里，但带 failed 状态（红色感叹号，点一下重发） */
@@ -2106,11 +2407,15 @@
       return msg;
     }
 
-    if (msg.state === 'failed') {
-      showToast('当前离线，消息没有发出去');
-    } else {
-      scheduleReply(session);
+    if (msg.kind === 'voice') {
+      /* 语音暂时只在本地：管道只传文字 */
+      msg.state = 'ok';
+      saveState();
+      showToast('语音还发不出去（管道只传文字）');
+      return msg;
     }
+
+    pipeSendMessage(session, msg);
     return msg;
   }
 
@@ -2119,15 +2424,7 @@
       showToast('还是没有网络，等一下再试');
       return;
     }
-    msg.state = 'sending';
-    saveState();
-    renderChat();
-
-    window.setTimeout(function () {
-      msg.state = 'ok';
-      renderChat();
-      scheduleReply(session);
-    }, 600);
+    pipeSendMessage(session, msg);
   }
 
   function sendMessage() {
@@ -2348,7 +2645,7 @@
       btn.setAttribute('aria-selected', on ? 'true' : 'false');
     });
 
-    const isSub = page === 'settings' || page === 'editprofile' || page === 'chatdetail';
+    const isSub = page === 'settings' || page === 'editprofile' || page === 'chatdetail' || page === 'link' || page === 'newchat';
     document.getElementById('phone').classList.toggle('is-sub', isSub);
 
     if (page !== 'chatdetail') {
@@ -2623,9 +2920,460 @@
     });
   }
 
+
+  /* ==========================================================
+     服务连接：管道地址 + 令牌
+     这一步只把地址存下来、试连一次；真正收发要等聊天那边接上管道。
+     ========================================================== */
+  const PIPE_BASE_KEY = 'dsh.pipe.base';
+  const PIPE_TOKEN_KEY = 'dsh.pipe.token';
+
+  function readPipeConfig() {
+    let base = '';
+    let token = '';
+    try {
+      base = window.localStorage.getItem(PIPE_BASE_KEY) || '';
+      token = window.localStorage.getItem(PIPE_TOKEN_KEY) || '';
+    } catch (err) {
+      /* 隐私模式读不了，当空的 */
+    }
+    return { base: base, token: token };
+  }
+
+  function normalizePipeBase(raw) {
+    const v = String(raw || '').trim().replace(/\/+$/, '');
+    if (!v) return '';
+    return /^https?:\/\//i.test(v) ? v : 'http://' + v;
+  }
+
+  function paintPipeState(kind, text) {
+    const el = document.getElementById('pipeState');
+    if (!el) return;
+    el.className = 'conn-state' + (kind === 'ok' ? ' is-ok' : kind === 'bad' ? ' is-bad' : '');
+    el.textContent = text;
+  }
+
+  function fillPipePage() {
+    const cfg = readPipeConfig();
+    const base = document.getElementById('pipeBase');
+    const token = document.getElementById('pipeToken');
+    if (base) base.value = cfg.base;
+    if (token) token.value = cfg.token;
+    paintPipeState('', cfg.base ? '还没连过，点一下「测试连接」' : '还没连接');
+    if (cfg.base) checkPipeStatus();
+  }
+
+  async function testPipe() {
+    const cfg = readPipeConfig();
+    if (!cfg.base) {
+      paintPipeState('bad', '先填管道地址');
+      return false;
+    }
+    if (!cfg.token) {
+      paintPipeState('bad', '先填令牌');
+      return false;
+    }
+
+    paintPipeState('', '正在连…');
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? window.setTimeout(function () { ctl.abort(); }, 6000) : null;
+
+    try {
+      /* 用 /info 而不是 /health：它要令牌，正好验证令牌对不对 */
+      const res = await fetch(cfg.base + '/info', {
+        headers: { 'X-DSH-Token': cfg.token },
+        cache: 'no-store',
+        signal: ctl ? ctl.signal : undefined,
+      });
+      if (!res.ok) {
+        paintPipeState(
+          'bad',
+          '连上了但被拒绝：HTTP ' + res.status + (res.status === 401 ? '（令牌不对）' : ''),
+        );
+        state.pipeStatus = 'offline';
+        paintConnection();
+        return false;
+      }
+      const data = await res.json().catch(function () { return {}; });
+      paintPipeState('ok', '✓ 已连接 · 队列到 #' + String(data.last == null ? '?' : data.last));
+      state.pipeStatus = 'online';
+      paintConnection();
+      return true;
+    } catch (err) {
+      const 名 = err && err.name === 'AbortError' ? '超时' : String((err && err.message) || err);
+      paintPipeState('bad', '连不上：' + 名);
+      state.pipeStatus = 'offline';
+      paintConnection();
+      return false;
+    } finally {
+      if (timer) window.clearTimeout(timer);
+    }
+  }
+
+  function savePipeConfig() {
+    const baseEl = document.getElementById('pipeBase');
+    const tokenEl = document.getElementById('pipeToken');
+    const base = normalizePipeBase(baseEl ? baseEl.value : '');
+    const token = (tokenEl ? tokenEl.value : '').trim();
+    try {
+      window.localStorage.setItem(PIPE_BASE_KEY, base);
+      window.localStorage.setItem(PIPE_TOKEN_KEY, token);
+    } catch (err) {
+      /* 存不下就算了，别炸 */
+    }
+    if (baseEl) baseEl.value = base;
+    return { base: base, token: token };
+  }
+
+  function bindPipePage() {
+    const row = document.getElementById('serviceLinkRow');
+    if (row) {
+      row.addEventListener('click', function () {
+        fillPipePage();
+        go('link');
+      });
+    }
+
+    const save = document.getElementById('pipeSave');
+    if (save) {
+      save.addEventListener('click', function () {
+        const cfg = savePipeConfig();
+        if (!cfg.base || !cfg.token) {
+          paintPipeState('bad', '地址和令牌都要填');
+          return;
+        }
+        showToast('地址已保存，正在连接…');
+        testPipe();
+      });
+    }
+
+    const test = document.getElementById('pipeTest');
+    if (test) {
+      test.addEventListener('click', function () {
+        testPipe();
+      });
+    }
+  }
+
+
+  /* ==========================================================
+     创建聊天：右上角 + 下拉（创建聊天 / 创建群聊）
+     ========================================================== */
+  let newChatAvatar = '';
+
+  function paintNewChatAvatar() {
+    const box = document.getElementById('newChatAvatar');
+    const hint = document.getElementById('newChatAvatarHint');
+    if (!box) return;
+    if (newChatAvatar) {
+      box.classList.add('has-image');
+      box.style.backgroundImage = 'url("' + newChatAvatar + '")';
+      if (hint) hint.textContent = '点一下换一张';
+    } else {
+      box.classList.remove('has-image');
+      box.style.backgroundImage = '';
+      if (hint) hint.textContent = '点一下上传头像';
+    }
+  }
+
+  function pickNewChatAvatar(file) {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function () {
+      const raw = reader.result;
+      const img = new Image();
+
+      img.onload = function () {
+        /* 头像小，压到 160px 就够，别把存档撑大 */
+        const max = 160;
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        try {
+          newChatAvatar = canvas.toDataURL('image/jpeg', 0.86);
+        } catch (err) {
+          newChatAvatar = raw;
+        }
+        paintNewChatAvatar();
+      };
+
+      img.onerror = function () {
+        newChatAvatar = raw;
+        paintNewChatAvatar();
+      };
+
+      img.src = raw;
+    };
+
+    reader.readAsDataURL(file);
+  }
+
+  function fillNewChatPage() {
+    newChatAvatar = '';
+    const nameEl = document.getElementById('newChatName');
+    if (nameEl) nameEl.value = '';
+    paintNewChatAvatar();
+  }
+
+  function createChat() {
+    const nameEl = document.getElementById('newChatName');
+    const name = (nameEl ? nameEl.value : '').trim();
+    if (!name) {
+      showToast('先给它起个名字');
+      return;
+    }
+
+    const session = {
+      id: 'friend-' + Date.now(),
+      name: name,
+      type: 'friend',
+      custom: true,
+      avatar: newChatAvatar || name.slice(0, 1),
+      pinned: false,
+      starred: false,
+      unread: false,
+      unreadCount: 0,
+      messages: [],
+    };
+    SESSIONS.push(session);
+
+    /* 建完回「全部」，免得当前筛在群聊上以为没建成 */
+    state.sessionFilter = 'all';
+    document.querySelectorAll('.seg-btn[data-session]').forEach(function (btn) {
+      const on = btn.dataset.session === 'all';
+      btn.classList.toggle('is-on', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+
+    newChatAvatar = '';
+    if (nameEl) nameEl.value = '';
+    paintNewChatAvatar();
+
+    saveState();
+    renderSessions();
+    showToast('建好了：' + name);
+    go('chat');
+  }
+
+  function bindNewChat() {
+    const plus = document.getElementById('newChatBtn');
+    if (plus) {
+      plus.addEventListener('click', function () {
+        openPopMenu(
+          plus,
+          [
+            { key: 'chat', label: '创建聊天' },
+            { key: 'group', label: '创建群聊' },
+          ],
+          function (key) {
+            if (key === 'group') {
+              showToast('建群 · 暂未开发');
+              return;
+            }
+            fillNewChatPage();
+            go('newchat');
+          },
+        );
+      });
+    }
+
+    const avatarBtn = document.getElementById('newChatAvatar');
+    const fileInput = document.getElementById('newChatFile');
+    if (avatarBtn && fileInput) {
+      avatarBtn.addEventListener('click', function () {
+        fileInput.click();
+      });
+      fileInput.addEventListener('change', function () {
+        pickNewChatAvatar(fileInput.files && fileInput.files[0]);
+        fileInput.value = '';
+      });
+    }
+
+    const create = document.getElementById('newChatCreate');
+    if (create) create.addEventListener('click', createChat);
+
+    const cancel = document.getElementById('newChatCancel');
+    if (cancel) {
+      cancel.addEventListener('click', function () {
+        go('chat');
+      });
+    }
+  }
+
+
+  /* ==========================================================
+     扫一扫
+     电脑上插件「绑定」页点「显示二维码」，内容是：
+       dshpipe:1?b=<地址>&t=<令牌>
+     扫到就自动填进上面两格，然后顺手连一次。
+     ========================================================== */
+  let scanStream = null;
+  let scanRaf = 0;
+
+  function parsePipePayload(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+
+    if (raw.indexOf('dshpipe:') === 0) {
+      const q = raw.indexOf('?') >= 0 ? raw.slice(raw.indexOf('?') + 1) : '';
+      const parts = q.split('&');
+      const 取 = function (key) {
+        for (let i = 0; i < parts.length; i++) {
+          const kv = parts[i].split('=');
+          if (decodeURIComponent(kv[0] || '') === key) {
+            return decodeURIComponent((kv[1] || '').replace(/\+/g, ' '));
+          }
+        }
+        return '';
+      };
+      const base = 取('b');
+      if (base) return { base: base, token: 取('t') };
+    }
+
+    /* 兜底：扫到的是个普通网址，就当管道地址用 */
+    if (/^https?:\/\//i.test(raw)) return { base: raw, token: '' };
+    return null;
+  }
+
+  function stopScan() {
+    if (scanRaf) {
+      window.cancelAnimationFrame(scanRaf);
+      scanRaf = 0;
+    }
+    if (scanStream) {
+      try {
+        scanStream.getTracks().forEach(function (t) { t.stop(); });
+      } catch (err) {
+        /* ignore */
+      }
+      scanStream = null;
+    }
+    const video = document.getElementById('scanVideo');
+    if (video) {
+      try { video.srcObject = null; } catch (err) { /* ignore */ }
+    }
+  }
+
+  function closeScan() {
+    stopScan();
+    const layer = document.getElementById('scanLayer');
+    if (layer) layer.hidden = true;
+  }
+
+  function applyScanned(text) {
+    const 结果 = parsePipePayload(text);
+    if (!结果) {
+      showToast('这不是鲸与鱼的二维码');
+      return;
+    }
+
+    const baseEl = document.getElementById('pipeBase');
+    const tokenEl = document.getElementById('pipeToken');
+    const base = normalizePipeBase(结果.base);
+    if (baseEl) baseEl.value = base;
+    if (tokenEl && 结果.token) tokenEl.value = 结果.token;
+
+    savePipeConfig();
+
+    if (!结果.token) {
+      paintPipeState('bad', '地址扫到了，令牌还得手填（或者让电脑显示完整二维码）');
+      return;
+    }
+    showToast('扫到了，正在连接…');
+    testPipe();
+  }
+
+  function scanLoop() {
+    const video = document.getElementById('scanVideo');
+    const canvas = document.getElementById('scanCanvas');
+    if (!video || !canvas) return;
+
+    const tick = function () {
+      if (!scanStream) return;
+
+      if (video.readyState === 4 && video.videoWidth) {
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, w, h);
+        try {
+          const img = ctx.getImageData(0, 0, w, h);
+          const code = window.jsQR ? window.jsQR(img.data, w, h, { inversionAttempts: 'dontInvert' }) : null;
+          if (code && code.data) {
+            closeScan();
+            applyScanned(code.data);
+            return;
+          }
+        } catch (err) {
+          /* 单帧解不出来很正常，继续下一帧 */
+        }
+      }
+
+      scanRaf = window.requestAnimationFrame(tick);
+    };
+
+    tick();
+  }
+
+  async function openScan() {
+    const layer = document.getElementById('scanLayer');
+    const video = document.getElementById('scanVideo');
+    const tip = document.getElementById('scanTip');
+    if (!layer || !video) return;
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast('这个环境不支持相机（真机上才行）');
+      return;
+    }
+    if (!window.jsQR) {
+      showToast('扫码组件没加载上');
+      return;
+    }
+
+    layer.hidden = false;
+    if (tip) tip.textContent = '在电脑上打开 DSH → 设置 → 鲸与鱼 → 绑定 → 显示二维码';
+
+    try {
+      scanStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+      video.srcObject = scanStream;
+      await video.play();
+      scanLoop();
+    } catch (err) {
+      if (tip) {
+        tip.textContent = '打不开相机：' + String((err && err.message) || err) + '（手机要在系统里给相机权限）';
+      }
+    }
+  }
+
+  function bindScan() {
+    const btn = document.getElementById('pipeScan');
+    if (btn) {
+      btn.addEventListener('click', function () {
+        openScan();
+      });
+    }
+    const cancel = document.getElementById('scanCancel');
+    if (cancel) cancel.addEventListener('click', closeScan);
+  }
+
   function bindEvents() {
     bindAskLayer();
     bindUpdateLayer();
+    bindPipePage();
+    bindNewChat();
+    bindScan();
+    startPipeWatch();
+    startPipePoll();
 
     /* App 里：等原生桥挂好，按存档里的开关状态把服务拉起来 */
     let bgTries = 0;

@@ -12,6 +12,7 @@ const ASSETS = [
   './manifest.json',
   './assets/xiaoyu.jpg',
   './assets/avatar-user.jpg',
+  './assets/vendor/jsQR.js',
   './assets/icon-192.png',
   './assets/icon-512.png',
   './assets/icon-180.png',
